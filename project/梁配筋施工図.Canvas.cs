@@ -18,6 +18,7 @@ using System.Windows.Shapes;
 using System.Xml.Linq;
 using Autodesk.Revit.DB;
 using Microsoft.Win32;
+using Microsoft.VisualBasic;
 using static System.Net.Mime.MediaTypeNames;
 using Application = System.Windows.Application;
 using Ellipse = System.Windows.Shapes.Ellipse;
@@ -1074,6 +1075,18 @@ namespace RevitProjectDataAddin
         private LineMeta _selectedMeta;
         private readonly Brush _highlight = Brushes.DodgerBlue;
 
+        sealed class ChainEditingState
+        {
+            public double Y { get; set; }
+            public double StartX { get; set; }
+            public List<double> Lengths { get; set; } = new List<double>();
+            public List<int> HardCutBoundaries { get; set; } = new List<int>();
+            public double Total => Lengths?.Sum() ?? 0.0;
+        }
+
+        private readonly Dictionary<GridBotsecozu, List<ChainEditingState>> _uwaganeChainsByItem
+            = new Dictionary<GridBotsecozu, List<ChainEditingState>>();
+
         private readonly Dictionary<GridBotsecozu, List<(double yStart, double yEnd)>> _shitaganeAnkaYByItem
             = new Dictionary<GridBotsecozu, List<(double yStart, double yEnd)>>();
         private readonly Dictionary<GridBotsecozu, List<double>> _shitaganeOrangeYByItem
@@ -1115,6 +1128,16 @@ namespace RevitProjectDataAddin
             {
                 list = new List<double>();
                 _extraChainsByItem[item] = list;
+            }
+            return list;
+        }
+
+        private List<ChainEditingState> UwaganeChainsFor(GridBotsecozu item)
+        {
+            if (!_uwaganeChainsByItem.TryGetValue(item, out var list))
+            {
+                list = new List<ChainEditingState>();
+                _uwaganeChainsByItem[item] = list;
             }
             return list;
         }
@@ -1203,6 +1226,227 @@ namespace RevitProjectDataAddin
             SceneFor(owner).Add(new SceneLine(x1, y1, x2, y2, layer));
 
             return visual;
+        }
+
+        private static List<int> MapRowCutsToBoundaries(List<(double x1, double x2)> segs, List<double> rowCuts)
+        {
+            if (segs == null || segs.Count < 2 || rowCuts == null || rowCuts.Count == 0) return new List<int>();
+
+            var borders = new List<double>();
+            for (int i = 0; i < segs.Count - 1; i++)
+                borders.Add(0.5 * (segs[i].x2 + segs[i + 1].x1));
+
+            var result = new List<int>();
+            var used = new bool[borders.Count];
+            foreach (var cut in rowCuts)
+            {
+                int best = -1;
+                double bestD = double.PositiveInfinity;
+                for (int i = 0; i < borders.Count; i++)
+                {
+                    if (used[i]) continue;
+                    double d = Math.Abs(borders[i] - cut);
+                    if (d < bestD)
+                    {
+                        bestD = d;
+                        best = i;
+                    }
+                }
+                if (best >= 0)
+                {
+                    used[best] = true;
+                    result.Add(best);
+                }
+            }
+            return result;
+        }
+
+        private static List<(double x1, double x2)> BuildSegmentsFromState(ChainEditingState state)
+        {
+            var segs = new List<(double x1, double x2)>();
+            if (state?.Lengths == null || state.Lengths.Count == 0) return segs;
+
+            double cur = state.StartX;
+            foreach (var len in state.Lengths)
+            {
+                double next = cur + len;
+                segs.Add((cur, next));
+                cur = next;
+            }
+            return segs;
+        }
+
+        private static List<double> ComputeCutPositions(ChainEditingState state, List<(double x1, double x2)> segs)
+        {
+            var cuts = new List<double>();
+            if (state?.HardCutBoundaries == null || segs == null) return cuts;
+
+            foreach (var idx in state.HardCutBoundaries)
+            {
+                if (idx < 0 || idx >= segs.Count - 1) continue;
+                cuts.Add(0.5 * (segs[idx].x2 + segs[idx + 1].x1));
+            }
+            return cuts;
+        }
+
+        private void RemoveSegmentAt(ChainEditingState state, int index)
+        {
+            if (state == null || index < 0 || index >= state.Lengths.Count) return;
+            state.Lengths.RemoveAt(index);
+            state.HardCutBoundaries = state.HardCutBoundaries
+                .Where(b => b != index && b != index - 1)
+                .Select(b => b > index ? b - 1 : b)
+                .Where(b => b >= 0)
+                .ToList();
+        }
+
+        private void CleanSmallSegments(ChainEditingState state, double tol = 0.001)
+        {
+            if (state == null || state.Lengths == null) return;
+            for (int i = state.Lengths.Count - 1; i >= 0; i--)
+            {
+                if (state.Lengths[i] <= tol)
+                {
+                    RemoveSegmentAt(state, i);
+                }
+            }
+            state.HardCutBoundaries = state.HardCutBoundaries
+                .Where(b => b >= 0 && b < Math.Max(0, state.Lengths.Count - 1))
+                .ToList();
+        }
+
+        private void ApplyLengthChange(ChainEditingState state, int editedIndex, double newLength)
+        {
+            if (state == null || state.Lengths == null) return;
+            if (editedIndex < 0 || editedIndex >= state.Lengths.Count) return;
+
+            double tol = 1e-6;
+            double orig = state.Lengths[editedIndex];
+            double delta = newLength - orig;
+            if (Math.Abs(delta) < tol) return;
+
+            state.Lengths[editedIndex] = newLength;
+            double compensation = -delta;
+
+            for (int i = state.Lengths.Count - 1; i >= 0 && Math.Abs(compensation) > tol; i--)
+            {
+                if (i == editedIndex) continue;
+                double len = state.Lengths[i];
+                if (compensation < 0)
+                {
+                    double reduce = Math.Min(len, -compensation);
+                    double newTail = len - reduce;
+                    compensation += reduce;
+                    if (newTail <= tol)
+                    {
+                        RemoveSegmentAt(state, i);
+                        if (i < editedIndex) editedIndex--;
+                    }
+                    else
+                    {
+                        state.Lengths[i] = newTail;
+                    }
+                }
+                else
+                {
+                    state.Lengths[i] = len + compensation;
+                    compensation = 0;
+                }
+            }
+
+            if (Math.Abs(compensation) > tol && editedIndex >= 0 && editedIndex < state.Lengths.Count)
+            {
+                double len = state.Lengths[editedIndex];
+                double adjusted = len + compensation;
+                if (adjusted <= tol)
+                {
+                    RemoveSegmentAt(state, editedIndex);
+                }
+                else
+                {
+                    state.Lengths[editedIndex] = adjusted;
+                }
+            }
+
+            CleanSmallSegments(state, tol);
+        }
+
+        private ChainEditingState SyncUwaganeChainState(
+            GridBotsecozu owner,
+            double y,
+            List<(double x1, double x2)> merged,
+            List<double> rowCuts)
+        {
+            var list = UwaganeChainsFor(owner);
+            const double yTol = 0.1;
+            var state = list.FirstOrDefault(s => Math.Abs(s.Y - y) < yTol);
+            double total = merged.Sum(s => s.x2 - s.x1);
+            var hardIndices = MapRowCutsToBoundaries(merged, rowCuts);
+
+            if (state == null)
+            {
+                state = new ChainEditingState
+                {
+                    Y = y,
+                    StartX = merged[0].x1,
+                    Lengths = merged.Select(s => s.x2 - s.x1).ToList(),
+                    HardCutBoundaries = hardIndices
+                };
+                list.Add(state);
+            }
+            else
+            {
+                state.Y = y;
+                state.StartX = merged[0].x1;
+                if (Math.Abs(state.Total - total) > 0.1)
+                {
+                    state.Lengths = merged.Select(s => s.x2 - s.x1).ToList();
+                }
+                state.HardCutBoundaries = hardIndices;
+            }
+
+            CleanSmallSegments(state);
+            return state;
+        }
+
+        private void MakeLengthTextInteractive(
+            TextBlock tb,
+            ChainEditingState state,
+            int segmentIndex,
+            Canvas canvas,
+            GridBotsecozu owner)
+        {
+            if (tb == null || state == null) return;
+            tb.Cursor = Cursors.Hand;
+            tb.MouseLeftButtonUp += (s, e) =>
+            {
+                e.Handled = true;
+                var menu = new ContextMenu();
+                var optA = new MenuItem { Header = \"A\" };
+                var optB = new MenuItem { Header = \"B\" };
+
+                optA.Click += (_, __) =>
+                {
+                    double currentLen = (segmentIndex >= 0 && segmentIndex < state.Lengths.Count)
+                        ? state.Lengths[segmentIndex]
+                        : 0.0;
+                    string input = Interaction.InputBox(
+                        \"Nhập chiều dài mới cho đoạn 上筋 (mm)\",
+                        \"Chỉnh chiều dài 上筋\",
+                        $\"{currentLen:0}\");
+
+                    if (double.TryParse(input, NumberStyles.Any, CultureInfo.InvariantCulture, out double newLen)
+                        && newLen > 0)
+                    {
+                        ApplyLengthChange(state, segmentIndex, newLen);
+                        Redraw(canvas, owner);
+                    }
+                };
+
+                menu.Items.Add(optA);
+                menu.Items.Add(optB);
+                menu.IsOpen = true;
+            };
         }
 
         private void ShowContextMenuForLine(Canvas canvas, Line line, LineMeta meta)
@@ -1554,7 +1798,7 @@ namespace RevitProjectDataAddin
             // === Helper: VẼ TEXT CAM 2 dòng với ANKA
             // DÒNG TRÊN: D{φ}-{(lenRounded + ankaAdd)}
             // DÒNG DƯỚI: {lenRounded}  (luôn hiển thị)
-            void DimOrangeSegmentWithAnkaLabels(
+            (TextBlock Top, TextBlock Bottom) DimOrangeSegmentWithAnkaLabels(
                 Canvas cvs, WCTransform tr, GridBotsecozu owner,
                 double x1, double x2, double y,
                 double dyTop, double dyBottom,
@@ -1564,10 +1808,10 @@ namespace RevitProjectDataAddin
                 bool textAboveLine // true: chữ nằm phía trên thanh cam
             )
             {
-                if (!ShowOrangeDims) return;
+                if (!ShowOrangeDims) return (null, null);
 
                 double baseLen = (x2 - x1);
-                if (baseLen < MinDimLen) return;
+                if (baseLen < MinDimLen) return (null, null);
 
                 double cx = 0.5 * (x1 + x2);
                 int si = FindSpanIndexByX(cx, spanLeftArrLocal, spanRightArrLocal, spanCountLocal);
@@ -1580,18 +1824,22 @@ namespace RevitProjectDataAddin
                                + (hitRight ? Math.Max(0, ankaRightLen) : 0.0);
 
                 string topTxt = $"D{phi:0}-{(baseLen + ankaAdd):0}";
-                DrawText_Rec(cvs, tr, owner, topTxt, cx, y + dyTop, dimFont, Brushes.DimGray,
+                var topTb = DrawText_Rec(cvs, tr, owner, topTxt, cx, y + dyTop, dimFont, Brushes.DimGray,
                     HAnchor.Center, textAboveLine ? VAnchor.Bottom : VAnchor.Top, 150, "DIM");
+
+                TextBlock botTb = null;
 
                 if (ankaAdd > 0.0)
                 {
                     string botTxt = $"({baseLen:0})";
                     if (hata1 == true)
                     {
-                        DrawText_Rec(cvs, tr, owner, botTxt, cx, y + dyBottom, dimFont, Brushes.Red,
+                        botTb = DrawText_Rec(cvs, tr, owner, botTxt, cx, y + dyBottom, dimFont, Brushes.Red,
                                      HAnchor.Center, textAboveLine ? VAnchor.Top : VAnchor.Bottom, 150, "DIM");
                     }
                 }
+
+                return (topTb, botTb);
             }
 
             // === Helper cũ (giữ nếu cần chỗ khác)
@@ -3239,17 +3487,22 @@ namespace RevitProjectDataAddin
                     // >>> VẼ DOT sau khi làm tròn (đúng biên thực)
                     //DrawAdjustedHardCutDots(canvas, T, item, merged, rowCuts, y, dotR, Brushes.Black, tonariOffset);
 
+                    var chainState = SyncUwaganeChainState(item, y, merged, rowCuts);
+                    var displaySegs = BuildSegmentsFromState(chainState);
+                    if (displaySegs.Count == 0) continue;
+                    var cutPositions = ComputeCutPositions(chainState, displaySegs);
+
                     DrawAdjustedHardCutDots(
-                        canvas, T, item, merged, rowCuts, y, dotR, Brushes.Black, 0,
+                        canvas, T, item, displaySegs, cutPositions, y, dotR, Brushes.Black, 0,
                         x => GetTonariDotOffset(kRow, x));
 
 
-                    foreach (var seg in merged)
+                    for (int segIndex = 0; segIndex < displaySegs.Count; segIndex++)
                     {
+                        var seg = displaySegs[segIndex];
                         DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x2, y, Brushes.Orange, 1.2, null, "MARK");
 
-                        // TEXT CAM: dùng chiều dài đã làm tròn (hoặc đoạn cuối không làm tròn)
-                        DimOrangeSegmentWithAnkaLabels(
+                        var dimTexts = DimOrangeSegmentWithAnkaLabels(
                             canvas, T, item,
                             seg.x1, seg.x2,
                             y, /*dyTop*/ DimDyUpper - 200, /*dyBottom*/ -DimDyUpper + 180,
@@ -3258,6 +3511,8 @@ namespace RevitProjectDataAddin
                             /*ANKA phải*/  hasRightAnka_Global && !teiUwaNow, rightAnkaX_Global, ankaUwa,
                             /*textAboveLine*/ true
                         );
+
+                        MakeLengthTextInteractive(dimTexts.Top, chainState, segIndex, canvas, item);
                     }
                 }
             }
@@ -3561,7 +3816,7 @@ namespace RevitProjectDataAddin
                         DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x2, y, Brushes.Orange, 1.2, null, "MARK");
 
                         // TEXT CAM
-                        DimOrangeSegmentWithAnkaLabels(
+                        _ = DimOrangeSegmentWithAnkaLabels(
                             canvas, T, item,
                             seg.x1, seg.x2,
                             y, /*dyTop*/ DimDyUpper - 200, /*dyBottom*/ -DimDyUpper + 180,
@@ -3833,7 +4088,7 @@ namespace RevitProjectDataAddin
                         DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x2, y, Brushes.Orange, 1.2, null, "MARK");
 
                         // TEXT CAM
-                        DimOrangeSegmentWithAnkaLabels(
+                        _ = DimOrangeSegmentWithAnkaLabels(
                             canvas, T, item,
                             seg.x1, seg.x2,
                             y, /*dyTop*/ DimDyUpper - 200, /*dyBottom*/ -DimDyUpper + 180,
@@ -4119,7 +4374,7 @@ namespace RevitProjectDataAddin
                         DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x2, y, Brushes.Orange, 1.2, null, "MARK");
 
                         // TEXT CAM (nhóm dưới): textAboveLine=false, dùng DimDyLower
-                        DimOrangeSegmentWithAnkaLabels(
+                        _ = DimOrangeSegmentWithAnkaLabels(
                             canvas, T, item,
                             seg.x1, seg.x2,
                             y, /*dyTop*/ DimDyLower - 100, /*dyBottom*/ -DimDyLower + 50,
@@ -4405,7 +4660,7 @@ namespace RevitProjectDataAddin
                         DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x2, y, Brushes.Orange, 1.2, null, "MARK");
 
                         // TEXT CAM (nhóm dưới)
-                        DimOrangeSegmentWithAnkaLabels(
+                        _ = DimOrangeSegmentWithAnkaLabels(
                             canvas, T, item,
                             seg.x1, seg.x2,
                             y, /*dyTop*/ DimDyLower - 100, /*dyBottom*/ -DimDyLower + 50,
@@ -4762,7 +5017,7 @@ namespace RevitProjectDataAddin
                             DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x2, y, Brushes.Orange, 1.2, null, "MARK");
 
                             // TEXT CAM (nhóm dưới)
-                            DimOrangeSegmentWithAnkaLabels(
+                            _ = DimOrangeSegmentWithAnkaLabels(
                                 canvas, T, item,
                                 seg.x1, seg.x2,
                                 y, /*dyTop*/ DimDyLower - 100, /*dyBottom*/ -DimDyLower + 50,
