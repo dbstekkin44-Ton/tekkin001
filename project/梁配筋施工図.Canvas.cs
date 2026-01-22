@@ -879,6 +879,10 @@ namespace RevitProjectDataAddin
             }
 
             dict[topKey] = info;
+            if (info.HasBottomKey)
+            {
+                dict[info.BottomKey] = info;
+            }
         }
 
         private bool IsOrangeSegDeleted(GridBotsecozu owner, int rowIndex, double x1, double x2, double y)
@@ -919,18 +923,18 @@ namespace RevitProjectDataAddin
             return false;
         }
 
-        private bool DeleteOrangeDimSegment(GridBotsecozu owner, OrangeDimTextKey clickedTopKey)
+        private bool DeleteOrangeDimSegment(GridBotsecozu owner, OrangeDimTextKey clickedKey)
         {
             if (owner == null) return false;
 
             bool changed = false;
 
-            // 1) clear text override của TOP
-            changed |= SetOrangeDimText(owner, clickedTopKey, "");
+            // 1) clear text override của DIM đã click
+            changed |= SetOrangeDimText(owner, clickedKey, "");
 
             // 2) tìm segment info để xoá line + anka + bottom
             if (_orangeDimToSegInfo.TryGetValue(owner, out var dict) && dict != null
-                && dict.TryGetValue(clickedTopKey, out var info))
+                && dict.TryGetValue(clickedKey, out var info))
             {
                 // 2a) mark segment deleted
                 if (!_deletedOrangeSegs.TryGetValue(owner, out var set) || set == null)
@@ -940,8 +944,10 @@ namespace RevitProjectDataAddin
                 }
                 if (set.Add(info.SegKey)) changed = true;
 
-                // 2b) clear bottom override (nếu có)
-                if (info.HasBottomKey)
+                // 2b) clear TOP/BOTTOM override (nếu có)
+                if (!clickedKey.Equals(info.TopKey))
+                    changed |= SetOrangeDimText(owner, info.TopKey, "");
+                if (info.HasBottomKey && !clickedKey.Equals(info.BottomKey))
                     changed |= SetOrangeDimText(owner, info.BottomKey, "");
 
                 // 2c) suppress anka theo side mà segment này “dính” biên
@@ -3185,9 +3191,11 @@ namespace RevitProjectDataAddin
                 int si = FindSpanIndexByX(cx, spanLeftArrLocal, spanRightArrLocal, spanCountLocal);
                 double phi = (si >= 0 && si < phiMidArray.Length) ? Math.Max(0, phiMidArray[si]) : 0.0;
 
-                // Anka hit-test theo biên hình học thực
-                bool hitLeft = hasLeftAnka && Near(x1, leftAnkaX, 0.5);
-                bool hitRight = hasRightAnka && Near(x2, rightAnkaX, 0.5);
+                // Anka hit-test theo biên hình học thực (bỏ qua nếu đã suppress)
+                bool leftSuppressed = IsAnkaSuppressed(owner, rowIndex, AnkaSide.Left);
+                bool rightSuppressed = IsAnkaSuppressed(owner, rowIndex, AnkaSide.Right);
+                bool hitLeft = hasLeftAnka && !leftSuppressed && Near(x1, leftAnkaX, 0.5);
+                bool hitRight = hasRightAnka && !rightSuppressed && Near(x2, rightAnkaX, 0.5);
 
                 double ankaAdd =
                     (hitLeft ? Math.Max(0, ankaLeftLen) : 0.0) +
@@ -4789,7 +4797,7 @@ namespace RevitProjectDataAddin
 
                             if (!teiUwaNow)
                             {
-                                if (ankaUwa > 0)
+                                if (ankaUwa > 0 && !IsAnkaSuppressed(item, kRow, AnkaSide.Left))
                                 {
                                     // Vẽ ANKA lên trên
                                     double ankaLeftSigned = GetAnkaOverride(item, kRow, AnkaSide.Left, +ankaUwa); // default: lên
@@ -4873,7 +4881,7 @@ namespace RevitProjectDataAddin
 
                             if (!teiUwaNow)
                             {
-                                if (ankaUwa > 0)
+                                if (ankaUwa > 0 && !IsAnkaSuppressed(item, kRow, AnkaSide.Right))
                                 {
                                     double ankaRightSigned = GetAnkaOverride(item, kRow, AnkaSide.Right, +ankaUwa); // default: lên
                                     DrawLine_Rec(canvas, T, item, x2, y, x2, y + ankaRightSigned, Brushes.Orange, 1.2, null, "MARK");
@@ -4881,7 +4889,7 @@ namespace RevitProjectDataAddin
                                     if (anka1 == true)
                                     {
                                         DrawText_Rec(canvas, T, item, $"{ankaUwa:0}", x2 + 250, y + ankaUwa / 2.0 + 100, dimFont,
-                                                 Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
+                                            Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
                                     }
                                 }
                             }
@@ -5116,7 +5124,7 @@ namespace RevitProjectDataAddin
 
                             if (!teiUwaChuNow)
                             {
-                                if (ankaUwaChu > 0)
+                                if (ankaUwaChu > 0 && !IsAnkaSuppressed(item, kRow, AnkaSide.Left))
                                 {
                                     DrawLine_Rec(canvas, T, item, x1, y, x1, y + ankaUwaChu, Brushes.Orange, 1.2, null, "MARK");
                                     // <<< ANKA TEXT >>>
@@ -5198,7 +5206,7 @@ namespace RevitProjectDataAddin
                             if (!teiUwaChuNow)
                             {
 
-                                if (ankaUwaChu > 0)
+                                if (ankaUwaChu > 0 && !IsAnkaSuppressed(item, kRow, AnkaSide.Right))
                                 {
                                     DrawLine_Rec(canvas, T, item, x2, y, x2, y + ankaUwaChu, Brushes.Orange, 1.2, null, "MARK");
                                     // <<< ANKA TEXT >>>
@@ -5400,7 +5408,7 @@ namespace RevitProjectDataAddin
                             if (!teiUwaChuNow)
                             {
 
-                                if (ankaUwaChu > 0)
+                                if (ankaUwaChu > 0 && !IsAnkaSuppressed(item, kRow, AnkaSide.Left))
                                 {
                                     DrawLine_Rec(canvas, T, item, x1, y, x1, y + ankaUwaChu, Brushes.Orange, 1.2, null, "MARK");
                                     // <<< ANKA TEXT >>>
@@ -5489,7 +5497,8 @@ namespace RevitProjectDataAddin
                         x1 = Math.Max(x1, midArr[i] + minGap);
                         if (x2 > x1)
                         {
-                            if (!teiUwaChuNow && i == spanCount - 1 && ankaUwaChu > 0)
+                            if (!teiUwaChuNow && i == spanCount - 1 && ankaUwaChu > 0
+                                && !IsAnkaSuppressed(item, kRow, AnkaSide.Right))
                             {
                                 DrawLine_Rec(canvas, T, item, x2, y, x2, y + ankaUwaChu, Brushes.Orange, 1.2, null, "MARK");
                                 // <<< ANKA TEXT >>>
@@ -5683,7 +5692,7 @@ namespace RevitProjectDataAddin
 
                             if (!teiShitaChuNow)
                             {
-                                if (ankaShitaChu > 0)
+                                if (ankaShitaChu > 0 && !IsAnkaSuppressed(item, kRow, AnkaSide.Left))
                                 {
 
                                     DrawLine_Rec(canvas, T, item, x1, y, x1, y - ankaShitaChu, Brushes.Orange, 1.2, null, "MARK");
@@ -5768,7 +5777,7 @@ namespace RevitProjectDataAddin
 
                             if (!teiShitaChuNow)
                             {
-                                if (ankaShitaChu > 0)
+                                if (ankaShitaChu > 0 && !IsAnkaSuppressed(item, kRow, AnkaSide.Right))
                                 {
 
                                     DrawLine_Rec(canvas, T, item, x2, y, x2, y - ankaShitaChu, Brushes.Orange, 1.2, null, "MARK");
@@ -5978,7 +5987,7 @@ namespace RevitProjectDataAddin
 
                             if (!teiShitaChuNow)
                             {
-                                if (ankaShitaChu > 0)
+                                if (ankaShitaChu > 0 && !IsAnkaSuppressed(item, kRow, AnkaSide.Left))
                                 {
 
                                     DrawLine_Rec(canvas, T, item, x1, y, x1, y - ankaShitaChu, Brushes.Orange, 1.2, null, "MARK");
@@ -6060,7 +6069,7 @@ namespace RevitProjectDataAddin
 
                             if (!teiShitaChuNow)
                             {
-                                if (ankaShitaChu > 0)
+                                if (ankaShitaChu > 0 && !IsAnkaSuppressed(item, kRow, AnkaSide.Right))
                                 {
                                     DrawLine_Rec(canvas, T, item, x2, y, x2, y - ankaShitaChu, Brushes.Orange, 1.2, null, "MARK");
                                     // <<< ANKA TEXT >>>
@@ -6334,7 +6343,7 @@ namespace RevitProjectDataAddin
 
                                 if (!teiShitaNow)
                                 {
-                                    if (ankaShita > 0)
+                                    if (ankaShita > 0 && !IsAnkaSuppressed(item, kRow, AnkaSide.Left))
                                     {
                                         DrawLine_Rec(canvas, T, item, x1, y, x1, y - ankaShita, Brushes.Orange, 1.2, null, "MARK");
                                         shitaAnkaYs.Add((y, y - ankaShita));
@@ -6418,7 +6427,7 @@ namespace RevitProjectDataAddin
 
                                 if (!teiShitaNow)
                                 {
-                                    if (ankaShita > 0)
+                                    if (ankaShita > 0 && !IsAnkaSuppressed(item, kRow, AnkaSide.Right))
                                     {
                                         DrawLine_Rec(canvas, T, item, x2, y, x2, y - ankaShita, Brushes.Orange, 1.2, null, "MARK");
                                         shitaAnkaYs.Add((y, y - ankaShita));
