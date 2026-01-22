@@ -3180,9 +3180,11 @@ namespace RevitProjectDataAddin
                 int si = FindSpanIndexByX(cx, spanLeftArrLocal, spanRightArrLocal, spanCountLocal);
                 double phi = (si >= 0 && si < phiMidArray.Length) ? Math.Max(0, phiMidArray[si]) : 0.0;
 
-                // Anka hit-test theo biên hình học thực
-                bool hitLeft = hasLeftAnka && Near(x1, leftAnkaX, 0.5);
-                bool hitRight = hasRightAnka && Near(x2, rightAnkaX, 0.5);
+                // Anka hit-test theo biên hình học thực (bỏ qua nếu đã suppress)
+                bool leftSuppressed = IsAnkaSuppressed(owner, rowIndex, AnkaSide.Left);
+                bool rightSuppressed = IsAnkaSuppressed(owner, rowIndex, AnkaSide.Right);
+                bool hitLeft = hasLeftAnka && !leftSuppressed && Near(x1, leftAnkaX, 0.5);
+                bool hitRight = hasRightAnka && !rightSuppressed && Near(x2, rightAnkaX, 0.5);
 
                 double ankaAdd =
                     (hitLeft ? Math.Max(0, ankaLeftLen) : 0.0) +
