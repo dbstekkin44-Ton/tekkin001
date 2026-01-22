@@ -3063,13 +3063,18 @@ namespace RevitProjectDataAddin
 
                 if (brush == null) brush = Brushes.Black;
 
-                // Tập ranh giới thật giữa các đoạn đã merged
+                const double JoinTol = 0.5;
+                // Tập ranh giới thật giữa các đoạn đã merged (chỉ khi 2 đoạn chạm nhau)
                 var borders = new List<double>(Math.Max(0, segs.Count - 1));
                 for (int i = 0; i < segs.Count - 1; i++)
                 {
-                    // dùng trung điểm để an toàn số học
-                    double bx = 0.5 * (segs[i].x2 + segs[i + 1].x1);
-                    borders.Add(bx);
+                    double gap = Math.Abs(segs[i + 1].x1 - segs[i].x2);
+                    if (gap <= JoinTol)
+                    {
+                        // dùng trung điểm để an toàn số học
+                        double bx = 0.5 * (segs[i].x2 + segs[i + 1].x1);
+                        borders.Add(bx);
+                    }
                 }
                 if (borders.Count == 0) return;
 
@@ -3112,10 +3117,15 @@ namespace RevitProjectDataAddin
                 if (merged == null || merged.Count < 2) return;
                 if (rowCuts == null || rowCuts.Count == 0) return;
 
-                // border giữa các seg
+                const double JoinTol = 0.5;
+                // border giữa các seg (chỉ khi chạm nhau)
                 var borders = new List<double>();
                 for (int i = 0; i < merged.Count - 1; i++)
-                    borders.Add(0.5 * (merged[i].x2 + merged[i + 1].x1));
+                {
+                    double gap = Math.Abs(merged[i + 1].x1 - merged[i].x2);
+                    if (gap <= JoinTol)
+                        borders.Add(0.5 * (merged[i].x2 + merged[i + 1].x1));
+                }
 
                 var used = new bool[borders.Count];
 
