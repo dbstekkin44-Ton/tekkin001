@@ -4939,19 +4939,19 @@ namespace RevitProjectDataAddin
                         {
                             if (Math.Abs(leftSigned) > 0.0001)
                             {
-                                DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x1, y + leftSigned, Brushes.Orange, 1.2, null, "MARK");
+                                DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x1, y - leftSigned, Brushes.Orange, 1.2, null, "MARK");
                                 if (anka1 == true)
                                 {
-                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(leftSigned):0}", seg.x1 - 650, y + leftSigned / 2.0 + 100, dimFont,
+                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(leftSigned):0}", seg.x1 - 650, y - leftSigned / 2.0 + 100, dimFont,
                                              Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
                                 }
                             }
                             if (Math.Abs(rightSigned) > 0.0001)
                             {
-                                DrawLine_Rec(canvas, T, item, seg.x2, y, seg.x2, y + rightSigned, Brushes.Orange, 1.2, null, "MARK");
+                                DrawLine_Rec(canvas, T, item, seg.x2, y, seg.x2, y - rightSigned, Brushes.Orange, 1.2, null, "MARK");
                                 if (anka1 == true)
                                 {
-                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(rightSigned):0}", seg.x2 + 250, y + rightSigned / 2.0 + 100, dimFont,
+                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(rightSigned):0}", seg.x2 + 250, y - rightSigned / 2.0 + 100, dimFont,
                                         Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
                                 }
                             }
@@ -5275,19 +5275,19 @@ namespace RevitProjectDataAddin
                         {
                             if (Math.Abs(leftSigned) > 0.0001)
                             {
-                                DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x1, y + leftSigned, Brushes.Orange, 1.2, null, "MARK");
+                                DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x1, y - leftSigned, Brushes.Orange, 1.2, null, "MARK");
                                 if (anka1 == true)
                                 {
-                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(leftSigned):0}", seg.x1 - 650, y + leftSigned / 2.0 + 100, dimFont,
+                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(leftSigned):0}", seg.x1 - 650, y - leftSigned / 2.0 + 100, dimFont,
                                              Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
                                 }
                             }
                             if (Math.Abs(rightSigned) > 0.0001)
                             {
-                                DrawLine_Rec(canvas, T, item, seg.x2, y, seg.x2, y + rightSigned, Brushes.Orange, 1.2, null, "MARK");
+                                DrawLine_Rec(canvas, T, item, seg.x2, y, seg.x2, y - rightSigned, Brushes.Orange, 1.2, null, "MARK");
                                 if (anka1 == true)
                                 {
-                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(rightSigned):0}", seg.x2 + 250, y + rightSigned / 2.0 + 100, dimFont,
+                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(rightSigned):0}", seg.x2 + 250, y - rightSigned / 2.0 + 100, dimFont,
                                              Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
                                 }
                             }
@@ -5572,19 +5572,19 @@ namespace RevitProjectDataAddin
                         {
                             if (Math.Abs(leftSigned) > 0.0001)
                             {
-                                DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x1, y + leftSigned, Brushes.Orange, 1.2, null, "MARK");
+                                DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x1, y - leftSigned, Brushes.Orange, 1.2, null, "MARK");
                                 if (anka1 == true)
                                 {
-                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(leftSigned):0}", seg.x1 - 650, y + leftSigned / 2.0 + 100, dimFont,
+                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(leftSigned):0}", seg.x1 - 650, y - leftSigned / 2.0 + 100, dimFont,
                                          Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
                                 }
                             }
                             if (Math.Abs(rightSigned) > 0.0001)
                             {
-                                DrawLine_Rec(canvas, T, item, seg.x2, y, seg.x2, y + rightSigned, Brushes.Orange, 1.2, null, "MARK");
+                                DrawLine_Rec(canvas, T, item, seg.x2, y, seg.x2, y - rightSigned, Brushes.Orange, 1.2, null, "MARK");
                                 if (anka1 == true)
                                 {
-                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(rightSigned):0}", seg.x2 + 250, y + rightSigned / 2.0 + 100, dimFont,
+                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(rightSigned):0}", seg.x2 + 250, y - rightSigned / 2.0 + 100, dimFont,
                                          Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
                                 }
                             }
@@ -5876,19 +5876,19 @@ namespace RevitProjectDataAddin
                         {
                             if (Math.Abs(leftSigned) > 0.0001)
                             {
-                                DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x1, y + leftSigned, Brushes.Orange, 1.2, null, "MARK");
+                                DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x1, y - leftSigned, Brushes.Orange, 1.2, null, "MARK");
                                 if (anka1 == true)
                                 {
-                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(leftSigned):0}", seg.x1 - 650, y + leftSigned / 2.0 + 100, dimFont,
+                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(leftSigned):0}", seg.x1 - 650, y - leftSigned / 2.0 + 100, dimFont,
                                              Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
                                 }
                             }
                             if (Math.Abs(rightSigned) > 0.0001)
                             {
-                                DrawLine_Rec(canvas, T, item, seg.x2, y, seg.x2, y + rightSigned, Brushes.Orange, 1.2, null, "MARK");
+                                DrawLine_Rec(canvas, T, item, seg.x2, y, seg.x2, y - rightSigned, Brushes.Orange, 1.2, null, "MARK");
                                 if (anka1 == true)
                                 {
-                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(rightSigned):0}", seg.x2 + 250, y + rightSigned / 2.0 + 100, dimFont,
+                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(rightSigned):0}", seg.x2 + 250, y - rightSigned / 2.0 + 100, dimFont,
                                              Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
                                 }
                             }
@@ -6179,19 +6179,19 @@ namespace RevitProjectDataAddin
                         {
                             if (Math.Abs(leftSigned) > 0.0001)
                             {
-                                DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x1, y + leftSigned, Brushes.Orange, 1.2, null, "MARK");
+                                DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x1, y - leftSigned, Brushes.Orange, 1.2, null, "MARK");
                                 if (anka1 == true)
                                 {
-                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(leftSigned):0}", seg.x1 - 650, y + leftSigned / 2.0 + 100, dimFont,
+                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(leftSigned):0}", seg.x1 - 650, y - leftSigned / 2.0 + 100, dimFont,
                                              Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
                                 }
                             }
                             if (Math.Abs(rightSigned) > 0.0001)
                             {
-                                DrawLine_Rec(canvas, T, item, seg.x2, y, seg.x2, y + rightSigned, Brushes.Orange, 1.2, null, "MARK");
+                                DrawLine_Rec(canvas, T, item, seg.x2, y, seg.x2, y - rightSigned, Brushes.Orange, 1.2, null, "MARK");
                                 if (anka1 == true)
                                 {
-                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(rightSigned):0}", seg.x2 + 250, y + rightSigned / 2.0 + 100, dimFont,
+                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(rightSigned):0}", seg.x2 + 250, y - rightSigned / 2.0 + 100, dimFont,
                                              Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
                                 }
                             }
@@ -6548,21 +6548,21 @@ namespace RevitProjectDataAddin
                             {
                                 if (Math.Abs(leftSigned) > 0.0001)
                                 {
-                                    DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x1, y + leftSigned, Brushes.Orange, 1.2, null, "MARK");
-                                    shitaAnkaYs.Add((y, y + leftSigned));
+                                    DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x1, y - leftSigned, Brushes.Orange, 1.2, null, "MARK");
+                                    shitaAnkaYs.Add((y, y - leftSigned));
                                     if (anka1 == true)
                                     {
-                                        DrawText_Rec(canvas, T, item, $"{Math.Abs(leftSigned):0}", seg.x1 - 650, y + leftSigned / 2.0 + 100, dimFont,
+                                        DrawText_Rec(canvas, T, item, $"{Math.Abs(leftSigned):0}", seg.x1 - 650, y - leftSigned / 2.0 + 100, dimFont,
                                                  Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
                                     }
                                 }
                                 if (Math.Abs(rightSigned) > 0.0001)
                                 {
-                                    DrawLine_Rec(canvas, T, item, seg.x2, y, seg.x2, y + rightSigned, Brushes.Orange, 1.2, null, "MARK");
-                                    shitaAnkaYs.Add((y, y + rightSigned));
+                                    DrawLine_Rec(canvas, T, item, seg.x2, y, seg.x2, y - rightSigned, Brushes.Orange, 1.2, null, "MARK");
+                                    shitaAnkaYs.Add((y, y - rightSigned));
                                     if (anka1 == true)
                                     {
-                                        DrawText_Rec(canvas, T, item, $"{Math.Abs(rightSigned):0}", seg.x2 + 250, y + rightSigned / 2.0 + 100, dimFont,
+                                        DrawText_Rec(canvas, T, item, $"{Math.Abs(rightSigned):0}", seg.x2 + 250, y - rightSigned / 2.0 + 100, dimFont,
                                                  Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
                                     }
                                 }
