@@ -1056,8 +1056,12 @@ namespace RevitProjectDataAddin
             {
                 if (tb.Tag is Tuple<System.Windows.Controls.Primitives.Popup,
                                     System.Windows.Controls.Primitives.Popup,
+                                    System.Windows.Controls.Primitives.Popup,
+                                    System.Windows.Controls.Primitives.Popup,
                                     System.Windows.Controls.Primitives.Popup> tuple)
                 {
+                    try { tuple.Item5.IsOpen = false; } catch { }
+                    try { tuple.Item4.IsOpen = false; } catch { }
                     try { tuple.Item3.IsOpen = false; } catch { }
                     try { tuple.Item2.IsOpen = false; } catch { }
                     try { tuple.Item1.IsOpen = false; } catch { }
@@ -1217,9 +1221,13 @@ namespace RevitProjectDataAddin
 
                 System.Windows.Controls.Primitives.Popup ankaPop = null;
                 System.Windows.Controls.Primitives.Popup sidePop = null;
+                System.Windows.Controls.Primitives.Popup lenPop = null;
+                System.Windows.Controls.Primitives.Popup lenDirPop = null;
 
                 void CloseSubMenus()
                 {
+                    if (lenDirPop != null) lenDirPop.IsOpen = false;
+                    if (lenPop != null) lenPop.IsOpen = false;
                     if (sidePop != null) sidePop.IsOpen = false;
                     if (ankaPop != null) ankaPop.IsOpen = false;
                 }
@@ -1297,6 +1305,8 @@ namespace RevitProjectDataAddin
 
                     try
                     {
+                        if (lenDirPop != null) lenDirPop.IsOpen = false;
+                        if (lenPop != null) lenPop.IsOpen = false;
                         if (sidePop != null) sidePop.IsOpen = false;
                         if (ankaPop != null) ankaPop.IsOpen = false;
                         if (mainPop != null) mainPop.IsOpen = false;
@@ -1417,7 +1427,9 @@ namespace RevitProjectDataAddin
                 tb.Tag = Tuple.Create(
                     mainPop,
                     ankaPop ?? new System.Windows.Controls.Primitives.Popup(),
-                    sidePop ?? new System.Windows.Controls.Primitives.Popup());
+                    sidePop ?? new System.Windows.Controls.Primitives.Popup(),
+                    lenPop ?? new System.Windows.Controls.Primitives.Popup(),
+                    lenDirPop ?? new System.Windows.Controls.Primitives.Popup());
 
                 Border WrapBox(UIElement child)
                 {
@@ -1563,7 +1575,9 @@ namespace RevitProjectDataAddin
 
                     tb.Tag = Tuple.Create(mainPop,
                                           ankaPop ?? new System.Windows.Controls.Primitives.Popup(),
-                                          sidePop);
+                                          sidePop,
+                                          lenPop ?? new System.Windows.Controls.Primitives.Popup(),
+                                          lenDirPop ?? new System.Windows.Controls.Primitives.Popup());
 
                     var root = new StackPanel { Orientation = Orientation.Vertical };
                     TextBox activeBox = null;
@@ -1743,6 +1757,148 @@ namespace RevitProjectDataAddin
                     }), DispatcherPriority.Input);
                 }
 
+                Button selectedLenBtn = null;
+                Button selectedLenDirBtn = null;
+
+                void SelectLen(Button btn)
+                {
+                    if (selectedLenBtn != null) selectedLenBtn.Background = normalBg;
+                    selectedLenBtn = btn;
+                    if (selectedLenBtn != null) selectedLenBtn.Background = selectedBg;
+                }
+
+                void SelectLenDir(Button btn)
+                {
+                    if (selectedLenDirBtn != null) selectedLenDirBtn.Background = normalBg;
+                    selectedLenDirBtn = btn;
+                    if (selectedLenDirBtn != null) selectedLenDirBtn.Background = selectedBg;
+                }
+
+                void OpenLenDirPopup(Button placementBtn)
+                {
+                    if (lenDirPop != null) lenDirPop.IsOpen = false;
+
+                    lenDirPop = new System.Windows.Controls.Primitives.Popup
+                    {
+                        PlacementTarget = placementBtn,
+                        Placement = System.Windows.Controls.Primitives.PlacementMode.Right,
+                        HorizontalOffset = 1,
+                        VerticalOffset = -1.5,
+                        AllowsTransparency = true,
+                        StaysOpen = true
+                    };
+
+                    tb.Tag = Tuple.Create(mainPop,
+                                          ankaPop ?? new System.Windows.Controls.Primitives.Popup(),
+                                          sidePop ?? new System.Windows.Controls.Primitives.Popup(),
+                                          lenPop ?? new System.Windows.Controls.Primitives.Popup(),
+                                          lenDirPop);
+
+                    var root = new StackPanel { Orientation = Orientation.Vertical };
+
+                    var btnPullLeft = MakeMenuButton("左へ引く", hasNext: false, minWidth: MENU3_MIN_WIDTH);
+                    btnPullLeft.MouseEnter += (_, __) =>
+                    {
+                        CancelActiveAnkaEdit();
+                        SelectLenDir(btnPullLeft);
+                    };
+                    btnPullLeft.Click += (_, __) =>
+                    {
+                        CancelActiveAnkaEdit();
+                        SelectLenDir(btnPullLeft);
+                        CloseAll();
+                    };
+
+                    var btnPullRight = MakeMenuButton("右へ引く", hasNext: false, minWidth: MENU3_MIN_WIDTH);
+                    btnPullRight.MouseEnter += (_, __) =>
+                    {
+                        CancelActiveAnkaEdit();
+                        SelectLenDir(btnPullRight);
+                    };
+                    btnPullRight.Click += (_, __) =>
+                    {
+                        CancelActiveAnkaEdit();
+                        SelectLenDir(btnPullRight);
+                        CloseAll();
+                    };
+
+                    root.Children.Add(WithRowDivider(btnPullLeft));
+                    root.Children.Add(WithRowDivider(btnPullRight));
+
+                    lenDirPop.Child = WrapBox(root);
+
+                    placementBtn.Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        lenDirPop.IsOpen = true;
+                        SelectLenDir(null);
+                    }), DispatcherPriority.Input);
+                }
+
+                void OpenLenPopup(Button placementBtn)
+                {
+                    if (lenDirPop != null) lenDirPop.IsOpen = false;
+                    if (lenPop != null) lenPop.IsOpen = false;
+                    if (sidePop != null) sidePop.IsOpen = false;
+                    if (ankaPop != null) ankaPop.IsOpen = false;
+
+                    lenPop = new System.Windows.Controls.Primitives.Popup
+                    {
+                        PlacementTarget = placementBtn,
+                        Placement = System.Windows.Controls.Primitives.PlacementMode.Right,
+                        HorizontalOffset = 1,
+                        VerticalOffset = -1.5,
+                        AllowsTransparency = true,
+                        StaysOpen = true
+                    };
+
+                    tb.Tag = Tuple.Create(mainPop,
+                                          ankaPop ?? new System.Windows.Controls.Primitives.Popup(),
+                                          sidePop ?? new System.Windows.Controls.Primitives.Popup(),
+                                          lenPop,
+                                          lenDirPop ?? new System.Windows.Controls.Primitives.Popup());
+
+                    var root = new StackPanel { Orientation = Orientation.Vertical };
+
+                    var btnLeft = MakeMenuButton("左", hasNext: true, minWidth: MENU2_MIN_WIDTH);
+                    btnLeft.MouseEnter += (_, __) =>
+                    {
+                        CancelActiveAnkaEdit();
+                        SelectLen(btnLeft);
+                        OpenLenDirPopup(btnLeft);
+                    };
+                    btnLeft.Click += (_, __) =>
+                    {
+                        CancelActiveAnkaEdit();
+                        SelectLen(btnLeft);
+                        OpenLenDirPopup(btnLeft);
+                    };
+
+                    var btnRight = MakeMenuButton("右", hasNext: true, minWidth: MENU2_MIN_WIDTH);
+                    btnRight.MouseEnter += (_, __) =>
+                    {
+                        CancelActiveAnkaEdit();
+                        SelectLen(btnRight);
+                        OpenLenDirPopup(btnRight);
+                    };
+                    btnRight.Click += (_, __) =>
+                    {
+                        CancelActiveAnkaEdit();
+                        SelectLen(btnRight);
+                        OpenLenDirPopup(btnRight);
+                    };
+
+                    root.Children.Add(WithRowDivider(btnLeft));
+                    root.Children.Add(WithRowDivider(btnRight));
+
+                    lenPop.Child = WrapBox(root);
+
+                    placementBtn.Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        lenPop.IsOpen = true;
+                        SelectLen(null);
+                    }), DispatcherPriority.Input);
+                }
+
                 void OpenAnkaPopup(Button placementBtn)
                 {
                     if (ankaPop != null) ankaPop.IsOpen = false;
@@ -1758,7 +1914,11 @@ namespace RevitProjectDataAddin
                         StaysOpen = true
                     };
 
-                    tb.Tag = Tuple.Create(mainPop, ankaPop, sidePop ?? new System.Windows.Controls.Primitives.Popup());
+                    tb.Tag = Tuple.Create(mainPop,
+                                          ankaPop,
+                                          sidePop ?? new System.Windows.Controls.Primitives.Popup(),
+                                          lenPop ?? new System.Windows.Controls.Primitives.Popup(),
+                                          lenDirPop ?? new System.Windows.Controls.Primitives.Popup());
 
                     var root = new StackPanel { Orientation = Orientation.Vertical };
 
@@ -1845,28 +2005,18 @@ namespace RevitProjectDataAddin
                         });
                 };
 
-                var btnLen = MakeMenuButton("長さ", hasNext: false, minWidth: MENU1_MIN_WIDTH); // ✅ CẤP 1
+                var btnLen = MakeMenuButton("長さ", hasNext: true, minWidth: MENU1_MIN_WIDTH); // ✅ CẤP 1
                 btnLen.MouseEnter += (_, __) =>
                 {
                     CancelActiveAnkaEdit();
-                    CloseSubMenus();
                     SelectMain(btnLen);
+                    OpenLenPopup(btnLen);
                 };
                 btnLen.Click += (_, __) =>
                 {
                     CancelActiveAnkaEdit();
-                    CloseSubMenus();
                     SelectMain(btnLen);
-                    CloseAll();
-
-                    TrySplitTopParts(tb.Text, out var curD, out var curLen);
-                    BeginInlineEdit(curLen, input =>
-                    {
-                        string newLen = (input ?? string.Empty).Trim();
-                        string newWhole = $"D{curD}-{newLen}";
-                        if (SetOrangeDimText(owner, key, newWhole))
-                            Redraw(canvas, owner);
-                    });
+                    OpenLenPopup(btnLen);
                 };
 
                 var btnCut = MakeMenuButton("鉄筋を切る", hasNext: false, minWidth: MENU1_MIN_WIDTH); // ✅ CẤP 1
@@ -1941,7 +2091,9 @@ namespace RevitProjectDataAddin
 
                     tb.Tag = Tuple.Create(mainPop,
                                           ankaPop ?? new System.Windows.Controls.Primitives.Popup(),
-                                          sidePop ?? new System.Windows.Controls.Primitives.Popup());
+                                          sidePop ?? new System.Windows.Controls.Primitives.Popup(),
+                                          lenPop ?? new System.Windows.Controls.Primitives.Popup(),
+                                          lenDirPop ?? new System.Windows.Controls.Primitives.Popup());
                 }), DispatcherPriority.Input);
             };
         }
