@@ -1812,7 +1812,7 @@ namespace RevitProjectDataAddin
                 }
 
                 Button selectedLenBtn = null;
-                Button selectedLenDirBtn = null;
+                FrameworkElement selectedLenDirBtn = null;
 
                 void SelectLen(Button btn)
                 {
@@ -1821,7 +1821,7 @@ namespace RevitProjectDataAddin
                     if (selectedLenBtn != null) selectedLenBtn.Background = selectedBg;
                 }
 
-                void SelectLenDir(Button btn)
+                void SelectLenDir(FrameworkElement btn)
                 {
                     if (selectedLenDirBtn != null) selectedLenDirBtn.Background = normalBg;
                     selectedLenDirBtn = btn;
