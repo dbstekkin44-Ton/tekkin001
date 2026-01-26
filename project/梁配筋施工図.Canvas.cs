@@ -996,6 +996,60 @@ namespace RevitProjectDataAddin
             return canvas;
         }
 
+        private FrameworkElement CreateLengthPreviewCanvas(bool pullLeft)
+        {
+            var canvas = new Canvas
+            {
+                Width = 60,
+                Height = 20,
+                Background = Brushes.Transparent
+            };
+
+            double centerY = 10;
+            double startX = pullLeft ? 45 : 15;
+            double endX = pullLeft ? 10 : 50;
+
+            canvas.Children.Add(new Line
+            {
+                X1 = startX,
+                Y1 = centerY,
+                X2 = endX,
+                Y2 = centerY,
+                Stroke = Brushes.Black,
+                StrokeThickness = 1.5,
+                SnapsToDevicePixels = true
+            });
+
+            var head = new Polygon
+            {
+                Fill = Brushes.Black,
+                Stroke = Brushes.Black,
+                StrokeThickness = 1
+            };
+
+            if (pullLeft)
+            {
+                head.Points = new PointCollection
+                {
+                    new Point(endX, centerY),
+                    new Point(endX + 6, centerY - 4),
+                    new Point(endX + 6, centerY + 4)
+                };
+            }
+            else
+            {
+                head.Points = new PointCollection
+                {
+                    new Point(endX, centerY),
+                    new Point(endX - 6, centerY - 4),
+                    new Point(endX - 6, centerY + 4)
+                };
+            }
+
+            canvas.Children.Add(head);
+            return canvas;
+        }
+
         private void MakeOrangeDimTextEditable(TextBlock tb, Canvas canvas, WCTransform T,
                                                double wx, double wy,
                                                GridBotsecozu owner,
@@ -1796,34 +1850,132 @@ namespace RevitProjectDataAddin
 
                     var root = new StackPanel { Orientation = Orientation.Vertical };
 
-                    var btnPullLeft = MakeMenuButton("左へ引く", hasNext: false, minWidth: MENU3_MIN_WIDTH);
-                    btnPullLeft.MouseEnter += (_, __) =>
-                    {
-                        CancelActiveAnkaEdit();
-                        SelectLenDir(btnPullLeft);
-                    };
-                    btnPullLeft.Click += (_, __) =>
-                    {
-                        CancelActiveAnkaEdit();
-                        SelectLenDir(btnPullLeft);
-                        CloseAll();
-                    };
+                    TextBox activeLenBox = null;
 
-                    var btnPullRight = MakeMenuButton("右へ引く", hasNext: false, minWidth: MENU3_MIN_WIDTH);
-                    btnPullRight.MouseEnter += (_, __) =>
+                    Border MakeLenDirRow(string label, bool pullLeft)
                     {
-                        CancelActiveAnkaEdit();
-                        SelectLenDir(btnPullRight);
-                    };
-                    btnPullRight.Click += (_, __) =>
-                    {
-                        CancelActiveAnkaEdit();
-                        SelectLenDir(btnPullRight);
-                        CloseAll();
-                    };
+                        var rowHost = new Border
+                        {
+                            Background = normalBg,
+                            Padding = new Thickness(10, 6, 10, 6),
+                            HorizontalAlignment = HorizontalAlignment.Stretch,
+                            MinWidth = MENU3_MIN_WIDTH,
+                            Cursor = Cursors.Hand
+                        };
 
-                    root.Children.Add(WithRowDivider(btnPullLeft));
-                    root.Children.Add(WithRowDivider(btnPullRight));
+                        var row = new DockPanel { LastChildFill = true };
+
+                        var lbl = new TextBlock
+                        {
+                            Text = label,
+                            VerticalAlignment = VerticalAlignment.Center
+                        };
+                        DockPanel.SetDock(lbl, Dock.Left);
+
+                        var preview = CreateLengthPreviewCanvas(pullLeft);
+                        DockPanel.SetDock(preview, Dock.Right);
+
+                        var box = new TextBox
+                        {
+                            Width = 60,
+                            MinWidth = 60,
+                            VerticalContentAlignment = VerticalAlignment.Center,
+                            Visibility = System.Windows.Visibility.Collapsed
+                        };
+                        DockPanel.SetDock(box, Dock.Right);
+
+                        row.Children.Add(lbl);
+                        row.Children.Add(box);
+                        row.Children.Add(preview);
+                        rowHost.Child = row;
+
+                        void FocusBox()
+                        {
+                            box.Dispatcher.BeginInvoke(new Action(() =>
+                            {
+                                box.Focus();
+                                box.SelectAll();
+                            }), DispatcherPriority.Input);
+                        }
+
+                        void EndEditShowPreview()
+                        {
+                            box.Visibility = System.Windows.Visibility.Collapsed;
+                            preview.Visibility = System.Windows.Visibility.Visible;
+
+                            if (activeLenBox == box) activeLenBox = null;
+                        }
+
+                        void BeginEdit()
+                        {
+                            if (activeLenBox != null && activeLenBox != box)
+                            {
+                                activeLenBox.Visibility = System.Windows.Visibility.Collapsed;
+                            }
+                            activeLenBox = box;
+
+                            box.Text = (box.Text ?? string.Empty).Trim();
+                            preview.Visibility = System.Windows.Visibility.Collapsed;
+                            box.Visibility = System.Windows.Visibility.Visible;
+                            FocusBox();
+                        }
+
+                        void TryCommitOrRefocus()
+                        {
+                            string now = (box.Text ?? string.Empty).Trim();
+                            if (!TryParseNumber(now, out var _))
+                            {
+                                FocusBox();
+                                return;
+                            }
+                            EndEditShowPreview();
+                        }
+
+                        rowHost.MouseLeftButtonDown += (ss, ee) =>
+                        {
+                            ee.Handled = true;
+                            SelectLenDir(rowHost);
+
+                            if (box.Visibility != System.Windows.Visibility.Visible)
+                                BeginEdit();
+                            else
+                                FocusBox();
+                        };
+
+                        rowHost.MouseEnter += (_, __) =>
+                        {
+                            CancelActiveAnkaEdit();
+                            SelectLenDir(rowHost);
+                        };
+
+                        box.KeyDown += (ss, ee) =>
+                        {
+                            if (ee.Key == Key.Enter)
+                            {
+                                TryCommitOrRefocus();
+                                ee.Handled = true;
+                            }
+                            else if (ee.Key == Key.Escape)
+                            {
+                                EndEditShowPreview();
+                                ee.Handled = true;
+                            }
+                        };
+
+                        box.LostKeyboardFocus += (_, __) =>
+                        {
+                            if (box.Visibility == System.Windows.Visibility.Visible)
+                                TryCommitOrRefocus();
+                        };
+
+                        return rowHost;
+                    }
+
+                    var rowPullLeft = MakeLenDirRow("左へ引く", pullLeft: true);
+                    var rowPullRight = MakeLenDirRow("右へ引く", pullLeft: false);
+
+                    root.Children.Add(WithRowDivider(rowPullLeft));
+                    root.Children.Add(WithRowDivider(rowPullRight));
 
                     lenDirPop.Child = WrapBox(root);
 
