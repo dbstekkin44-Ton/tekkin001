@@ -699,29 +699,29 @@ namespace RevitProjectDataAddin
             Right = 1
         }
 
-        private struct AnkaKey : IEquatable<AnkaKey>
+        private struct AnkaDimKey : IEquatable<AnkaDimKey>
         {
-            public int RowIndex;
+            public OrangeDimTextKey DimKey;
             public AnkaSide Side;
 
-            public AnkaKey(int rowIndex, AnkaSide side)
+            public AnkaDimKey(OrangeDimTextKey dimKey, AnkaSide side)
             {
-                RowIndex = rowIndex;
+                DimKey = dimKey;
                 Side = side;
             }
 
-            public bool Equals(AnkaKey other)
-                => RowIndex == other.RowIndex && Side == other.Side;
+            public bool Equals(AnkaDimKey other)
+                => DimKey.Equals(other.DimKey) && Side == other.Side;
 
             public override bool Equals(object obj)
-                => obj is AnkaKey other && Equals(other);
+                => obj is AnkaDimKey other && Equals(other);
 
             public override int GetHashCode()
             {
                 unchecked
                 {
                     int h = 17;
-                    h = h * 31 + RowIndex;
+                    h = h * 31 + DimKey.GetHashCode();
                     h = h * 31 + (int)Side;
                     return h;
                 }
@@ -731,32 +731,32 @@ namespace RevitProjectDataAddin
         // value: signed length (mm world)
         //  > 0 : vẽ lên (y + len)
         //  < 0 : vẽ xuống (y + len) (len âm)
-        private readonly Dictionary<GridBotsecozu, Dictionary<AnkaKey, double>> _ankaOverrides
-            = new Dictionary<GridBotsecozu, Dictionary<AnkaKey, double>>();
+        private readonly Dictionary<GridBotsecozu, Dictionary<AnkaDimKey, double>> _ankaOverrides
+            = new Dictionary<GridBotsecozu, Dictionary<AnkaDimKey, double>>();
 
-        private double GetAnkaOverride(GridBotsecozu owner, int rowIndex, AnkaSide side, double fallbackSigned)
+        private double GetAnkaOverride(GridBotsecozu owner, OrangeDimTextKey dimKey, AnkaSide side, double fallbackSigned)
         {
             if (owner != null
                 && _ankaOverrides.TryGetValue(owner, out var dict)
                 && dict != null
-                && dict.TryGetValue(new AnkaKey(rowIndex, side), out var v))
+                && dict.TryGetValue(new AnkaDimKey(dimKey, side), out var v))
             {
                 return v;
             }
             return fallbackSigned;
         }
 
-        private bool SetAnkaOverride(GridBotsecozu owner, int rowIndex, AnkaSide side, double signedLen)
+        private bool SetAnkaOverride(GridBotsecozu owner, OrangeDimTextKey dimKey, AnkaSide side, double signedLen)
         {
             if (owner == null) return false;
 
             if (!_ankaOverrides.TryGetValue(owner, out var dict) || dict == null)
             {
-                dict = new Dictionary<AnkaKey, double>();
+                dict = new Dictionary<AnkaDimKey, double>();
                 _ankaOverrides[owner] = dict;
             }
 
-            var k = new AnkaKey(rowIndex, side);
+            var k = new AnkaDimKey(dimKey, side);
 
             // signedLen == 0 => remove override (coi như chưa set)
             if (Math.Abs(signedLen) <= 0.0001)
@@ -854,6 +854,8 @@ namespace RevitProjectDataAddin
 
             public bool HitLeftAnka;
             public bool HitRightAnka;
+            public double DefaultLeftAnkaSigned;
+            public double DefaultRightAnkaSigned;
         }
 
         // map: click DIM (TopKey) -> segment info (x1/x2/y + hitLeft/hitRight + bottomKey)
@@ -864,9 +866,6 @@ namespace RevitProjectDataAddin
         private readonly Dictionary<GridBotsecozu, HashSet<OrangeSegKey>> _deletedOrangeSegs
             = new Dictionary<GridBotsecozu, HashSet<OrangeSegKey>>();
 
-        // set: anka đã bị suppress theo row+side (skip vẽ line đứng + text)
-        private readonly Dictionary<GridBotsecozu, HashSet<AnkaKey>> _suppressedAnkas
-            = new Dictionary<GridBotsecozu, HashSet<AnkaKey>>();
 
         private void RegisterOrangeSegInfo(GridBotsecozu owner, OrangeDimTextKey topKey, OrangeSegInfo info)
         {
@@ -879,6 +878,10 @@ namespace RevitProjectDataAddin
             }
 
             dict[topKey] = info;
+            if (info.HasBottomKey)
+            {
+                dict[info.BottomKey] = info;
+            }
         }
 
         private bool IsOrangeSegDeleted(GridBotsecozu owner, int rowIndex, double x1, double x2, double y)
@@ -892,45 +895,18 @@ namespace RevitProjectDataAddin
             return false;
         }
 
-        private void SuppressAnka(GridBotsecozu owner, int rowIndex, AnkaSide side, bool suppress)
-        {
-            if (owner == null) return;
-
-            if (!_suppressedAnkas.TryGetValue(owner, out var set) || set == null)
-            {
-                set = new HashSet<AnkaKey>();
-                _suppressedAnkas[owner] = set;
-            }
-
-            var k = new AnkaKey(rowIndex, side);
-
-            if (suppress) set.Add(k);
-            else set.Remove(k);
-        }
-
-        private bool IsAnkaSuppressed(GridBotsecozu owner, int rowIndex, AnkaSide side)
-        {
-            if (owner == null) return false;
-
-            if (_suppressedAnkas.TryGetValue(owner, out var set) && set != null)
-            {
-                return set.Contains(new AnkaKey(rowIndex, side));
-            }
-            return false;
-        }
-
-        private bool DeleteOrangeDimSegment(GridBotsecozu owner, OrangeDimTextKey clickedTopKey)
+        private bool DeleteOrangeDimSegment(GridBotsecozu owner, OrangeDimTextKey clickedKey)
         {
             if (owner == null) return false;
 
             bool changed = false;
 
-            // 1) clear text override của TOP
-            changed |= SetOrangeDimText(owner, clickedTopKey, "");
+            // 1) clear text override của DIM đã click
+            changed |= SetOrangeDimText(owner, clickedKey, "");
 
             // 2) tìm segment info để xoá line + anka + bottom
             if (_orangeDimToSegInfo.TryGetValue(owner, out var dict) && dict != null
-                && dict.TryGetValue(clickedTopKey, out var info))
+                && dict.TryGetValue(clickedKey, out var info))
             {
                 // 2a) mark segment deleted
                 if (!_deletedOrangeSegs.TryGetValue(owner, out var set) || set == null)
@@ -940,21 +916,12 @@ namespace RevitProjectDataAddin
                 }
                 if (set.Add(info.SegKey)) changed = true;
 
-                // 2b) clear bottom override (nếu có)
-                if (info.HasBottomKey)
+                // 2b) clear TOP/BOTTOM override (nếu có)
+                if (!clickedKey.Equals(info.TopKey))
+                    changed |= SetOrangeDimText(owner, info.TopKey, "");
+                if (info.HasBottomKey && !clickedKey.Equals(info.BottomKey))
                     changed |= SetOrangeDimText(owner, info.BottomKey, "");
 
-                // 2c) suppress anka theo side mà segment này “dính” biên
-                if (info.HitLeftAnka)
-                {
-                    SuppressAnka(owner, info.SegKey.RowIndex, AnkaSide.Left, suppress: true);
-                    changed = true;
-                }
-                if (info.HitRightAnka)
-                {
-                    SuppressAnka(owner, info.SegKey.RowIndex, AnkaSide.Right, suppress: true);
-                    changed = true;
-                }
             }
 
             return changed;
@@ -1029,6 +996,60 @@ namespace RevitProjectDataAddin
             return canvas;
         }
 
+        private FrameworkElement CreateLengthPreviewCanvas(bool pullLeft)
+        {
+            var canvas = new Canvas
+            {
+                Width = 60,
+                Height = 20,
+                Background = Brushes.Transparent
+            };
+
+            double centerY = 10;
+            double startX = pullLeft ? 45 : 15;
+            double endX = pullLeft ? 10 : 50;
+
+            canvas.Children.Add(new Line
+            {
+                X1 = startX,
+                Y1 = centerY,
+                X2 = endX,
+                Y2 = centerY,
+                Stroke = Brushes.Black,
+                StrokeThickness = 1.5,
+                SnapsToDevicePixels = true
+            });
+
+            var head = new Polygon
+            {
+                Fill = Brushes.Black,
+                Stroke = Brushes.Black,
+                StrokeThickness = 1
+            };
+
+            if (pullLeft)
+            {
+                head.Points = new PointCollection
+                {
+                    new Point(endX, centerY),
+                    new Point(endX + 6, centerY - 4),
+                    new Point(endX + 6, centerY + 4)
+                };
+            }
+            else
+            {
+                head.Points = new PointCollection
+                {
+                    new Point(endX, centerY),
+                    new Point(endX - 6, centerY - 4),
+                    new Point(endX - 6, centerY + 4)
+                };
+            }
+
+            canvas.Children.Add(head);
+            return canvas;
+        }
+
         private void MakeOrangeDimTextEditable(TextBlock tb, Canvas canvas, WCTransform T,
                                                double wx, double wy,
                                                GridBotsecozu owner,
@@ -1089,8 +1110,12 @@ namespace RevitProjectDataAddin
             {
                 if (tb.Tag is Tuple<System.Windows.Controls.Primitives.Popup,
                                     System.Windows.Controls.Primitives.Popup,
+                                    System.Windows.Controls.Primitives.Popup,
+                                    System.Windows.Controls.Primitives.Popup,
                                     System.Windows.Controls.Primitives.Popup> tuple)
                 {
+                    try { tuple.Item5.IsOpen = false; } catch { }
+                    try { tuple.Item4.IsOpen = false; } catch { }
                     try { tuple.Item3.IsOpen = false; } catch { }
                     try { tuple.Item2.IsOpen = false; } catch { }
                     try { tuple.Item1.IsOpen = false; } catch { }
@@ -1187,16 +1212,20 @@ namespace RevitProjectDataAddin
                 e.Handled = true;
                 CloseExistingPopups();
 
-                double GetDefaultAnkaUwa()
-                {
-                    var (ankaUwa, _, _, _) = GetAnkaNagaValues();
-                    return Math.Max(0, ankaUwa);
-                }
-
                 double GetCurrentFor(AnkaSide side, bool wantTop)
                 {
-                    double def = GetDefaultAnkaUwa();
-                    double curSigned = GetAnkaOverride(owner, key.RowIndex, side, +def);
+                    if (owner == null
+                        || !_orangeDimToSegInfo.TryGetValue(owner, out var dict)
+                        || dict == null
+                        || !dict.TryGetValue(key, out var info))
+                    {
+                        return 0.0;
+                    }
+
+                    double defSigned = (side == AnkaSide.Left)
+                        ? info.DefaultLeftAnkaSigned
+                        : info.DefaultRightAnkaSigned;
+                    double curSigned = GetAnkaOverride(owner, key, side, defSigned);
 
                     if (wantTop) return (curSigned > 0) ? Math.Abs(curSigned) : 0.0;
                     return (curSigned < 0) ? Math.Abs(curSigned) : 0.0;
@@ -1207,7 +1236,11 @@ namespace RevitProjectDataAddin
                     double len = Math.Max(0, newLen);
                     double signed = isTop ? +len : -len;
 
-                    if (SetAnkaOverride(owner, key.RowIndex, side, signed))
+                    if (owner != null
+                        && _orangeDimToSegInfo.TryGetValue(owner, out var dict)
+                        && dict != null
+                        && dict.TryGetValue(key, out var info)
+                        && SetAnkaOverride(owner, key, side, signed))
                         Redraw(canvas, owner);
                 }
 
@@ -1242,9 +1275,13 @@ namespace RevitProjectDataAddin
 
                 System.Windows.Controls.Primitives.Popup ankaPop = null;
                 System.Windows.Controls.Primitives.Popup sidePop = null;
+                System.Windows.Controls.Primitives.Popup lenPop = null;
+                System.Windows.Controls.Primitives.Popup lenDirPop = null;
 
                 void CloseSubMenus()
                 {
+                    if (lenDirPop != null) lenDirPop.IsOpen = false;
+                    if (lenPop != null) lenPop.IsOpen = false;
                     if (sidePop != null) sidePop.IsOpen = false;
                     if (ankaPop != null) ankaPop.IsOpen = false;
                 }
@@ -1322,6 +1359,8 @@ namespace RevitProjectDataAddin
 
                     try
                     {
+                        if (lenDirPop != null) lenDirPop.IsOpen = false;
+                        if (lenPop != null) lenPop.IsOpen = false;
                         if (sidePop != null) sidePop.IsOpen = false;
                         if (ankaPop != null) ankaPop.IsOpen = false;
                         if (mainPop != null) mainPop.IsOpen = false;
@@ -1442,7 +1481,9 @@ namespace RevitProjectDataAddin
                 tb.Tag = Tuple.Create(
                     mainPop,
                     ankaPop ?? new System.Windows.Controls.Primitives.Popup(),
-                    sidePop ?? new System.Windows.Controls.Primitives.Popup());
+                    sidePop ?? new System.Windows.Controls.Primitives.Popup(),
+                    lenPop ?? new System.Windows.Controls.Primitives.Popup(),
+                    lenDirPop ?? new System.Windows.Controls.Primitives.Popup());
 
                 Border WrapBox(UIElement child)
                 {
@@ -1588,7 +1629,9 @@ namespace RevitProjectDataAddin
 
                     tb.Tag = Tuple.Create(mainPop,
                                           ankaPop ?? new System.Windows.Controls.Primitives.Popup(),
-                                          sidePop);
+                                          sidePop,
+                                          lenPop ?? new System.Windows.Controls.Primitives.Popup(),
+                                          lenDirPop ?? new System.Windows.Controls.Primitives.Popup());
 
                     var root = new StackPanel { Orientation = Orientation.Vertical };
                     TextBox activeBox = null;
@@ -1768,6 +1811,246 @@ namespace RevitProjectDataAddin
                     }), DispatcherPriority.Input);
                 }
 
+                Button selectedLenBtn = null;
+                FrameworkElement selectedLenDirBtn = null;
+
+                void SelectLen(Button btn)
+                {
+                    if (selectedLenBtn != null) selectedLenBtn.Background = normalBg;
+                    selectedLenBtn = btn;
+                    if (selectedLenBtn != null) selectedLenBtn.Background = selectedBg;
+                }
+
+                void SelectLenDir(FrameworkElement btn)
+                {
+                    if (selectedLenDirBtn != null) selectedLenDirBtn.Background = normalBg;
+                    selectedLenDirBtn = btn;
+                    if (selectedLenDirBtn != null) selectedLenDirBtn.Background = selectedBg;
+                }
+
+                void OpenLenDirPopup(Button placementBtn)
+                {
+                    if (lenDirPop != null) lenDirPop.IsOpen = false;
+
+                    lenDirPop = new System.Windows.Controls.Primitives.Popup
+                    {
+                        PlacementTarget = placementBtn,
+                        Placement = System.Windows.Controls.Primitives.PlacementMode.Right,
+                        HorizontalOffset = 1,
+                        VerticalOffset = -1.5,
+                        AllowsTransparency = true,
+                        StaysOpen = true
+                    };
+
+                    tb.Tag = Tuple.Create(mainPop,
+                                          ankaPop ?? new System.Windows.Controls.Primitives.Popup(),
+                                          sidePop ?? new System.Windows.Controls.Primitives.Popup(),
+                                          lenPop ?? new System.Windows.Controls.Primitives.Popup(),
+                                          lenDirPop);
+
+                    var root = new StackPanel { Orientation = Orientation.Vertical };
+
+                    TextBox activeLenBox = null;
+
+                    Border MakeLenDirRow(string label, bool pullLeft)
+                    {
+                        var rowHost = new Border
+                        {
+                            Background = normalBg,
+                            Padding = new Thickness(10, 6, 10, 6),
+                            HorizontalAlignment = HorizontalAlignment.Stretch,
+                            MinWidth = MENU3_MIN_WIDTH,
+                            Cursor = Cursors.Hand
+                        };
+
+                        var row = new DockPanel { LastChildFill = true };
+
+                        var lbl = new TextBlock
+                        {
+                            Text = label,
+                            VerticalAlignment = VerticalAlignment.Center
+                        };
+                        DockPanel.SetDock(lbl, Dock.Left);
+
+                        var preview = CreateLengthPreviewCanvas(pullLeft);
+                        DockPanel.SetDock(preview, Dock.Right);
+
+                        var box = new TextBox
+                        {
+                            Width = 60,
+                            MinWidth = 60,
+                            VerticalContentAlignment = VerticalAlignment.Center,
+                            Visibility = System.Windows.Visibility.Collapsed
+                        };
+                        DockPanel.SetDock(box, Dock.Right);
+
+                        row.Children.Add(lbl);
+                        row.Children.Add(box);
+                        row.Children.Add(preview);
+                        rowHost.Child = row;
+
+                        void FocusBox()
+                        {
+                            box.Dispatcher.BeginInvoke(new Action(() =>
+                            {
+                                box.Focus();
+                                box.SelectAll();
+                            }), DispatcherPriority.Input);
+                        }
+
+                        void EndEditShowPreview()
+                        {
+                            box.Visibility = System.Windows.Visibility.Collapsed;
+                            preview.Visibility = System.Windows.Visibility.Visible;
+
+                            if (activeLenBox == box) activeLenBox = null;
+                        }
+
+                        void BeginEdit()
+                        {
+                            if (activeLenBox != null && activeLenBox != box)
+                            {
+                                activeLenBox.Visibility = System.Windows.Visibility.Collapsed;
+                            }
+                            activeLenBox = box;
+
+                            box.Text = (box.Text ?? string.Empty).Trim();
+                            preview.Visibility = System.Windows.Visibility.Collapsed;
+                            box.Visibility = System.Windows.Visibility.Visible;
+                            FocusBox();
+                        }
+
+                        void TryCommitOrRefocus()
+                        {
+                            string now = (box.Text ?? string.Empty).Trim();
+                            if (!TryParseNumber(now, out var _))
+                            {
+                                FocusBox();
+                                return;
+                            }
+                            EndEditShowPreview();
+                        }
+
+                        rowHost.MouseLeftButtonDown += (ss, ee) =>
+                        {
+                            ee.Handled = true;
+                            SelectLenDir(rowHost);
+
+                            if (box.Visibility != System.Windows.Visibility.Visible)
+                                BeginEdit();
+                            else
+                                FocusBox();
+                        };
+
+                        rowHost.MouseEnter += (_, __) =>
+                        {
+                            CancelActiveAnkaEdit();
+                            SelectLenDir(rowHost);
+                        };
+
+                        box.KeyDown += (ss, ee) =>
+                        {
+                            if (ee.Key == Key.Enter)
+                            {
+                                TryCommitOrRefocus();
+                                ee.Handled = true;
+                            }
+                            else if (ee.Key == Key.Escape)
+                            {
+                                EndEditShowPreview();
+                                ee.Handled = true;
+                            }
+                        };
+
+                        box.LostKeyboardFocus += (_, __) =>
+                        {
+                            if (box.Visibility == System.Windows.Visibility.Visible)
+                                TryCommitOrRefocus();
+                        };
+
+                        return rowHost;
+                    }
+
+                    var rowPullLeft = MakeLenDirRow("左へ引く", pullLeft: true);
+                    var rowPullRight = MakeLenDirRow("右へ引く", pullLeft: false);
+
+                    root.Children.Add(WithRowDivider(rowPullLeft));
+                    root.Children.Add(WithRowDivider(rowPullRight));
+
+                    lenDirPop.Child = WrapBox(root);
+
+                    placementBtn.Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        lenDirPop.IsOpen = true;
+                        SelectLenDir(null);
+                    }), DispatcherPriority.Input);
+                }
+
+                void OpenLenPopup(Button placementBtn)
+                {
+                    if (lenDirPop != null) lenDirPop.IsOpen = false;
+                    if (lenPop != null) lenPop.IsOpen = false;
+                    if (sidePop != null) sidePop.IsOpen = false;
+                    if (ankaPop != null) ankaPop.IsOpen = false;
+
+                    lenPop = new System.Windows.Controls.Primitives.Popup
+                    {
+                        PlacementTarget = placementBtn,
+                        Placement = System.Windows.Controls.Primitives.PlacementMode.Right,
+                        HorizontalOffset = 1,
+                        VerticalOffset = -1.5,
+                        AllowsTransparency = true,
+                        StaysOpen = true
+                    };
+
+                    tb.Tag = Tuple.Create(mainPop,
+                                          ankaPop ?? new System.Windows.Controls.Primitives.Popup(),
+                                          sidePop ?? new System.Windows.Controls.Primitives.Popup(),
+                                          lenPop,
+                                          lenDirPop ?? new System.Windows.Controls.Primitives.Popup());
+
+                    var root = new StackPanel { Orientation = Orientation.Vertical };
+
+                    var btnLeft = MakeMenuButton("左", hasNext: true, minWidth: MENU2_MIN_WIDTH);
+                    btnLeft.MouseEnter += (_, __) =>
+                    {
+                        CancelActiveAnkaEdit();
+                        SelectLen(btnLeft);
+                        OpenLenDirPopup(btnLeft);
+                    };
+                    btnLeft.Click += (_, __) =>
+                    {
+                        CancelActiveAnkaEdit();
+                        SelectLen(btnLeft);
+                        OpenLenDirPopup(btnLeft);
+                    };
+
+                    var btnRight = MakeMenuButton("右", hasNext: true, minWidth: MENU2_MIN_WIDTH);
+                    btnRight.MouseEnter += (_, __) =>
+                    {
+                        CancelActiveAnkaEdit();
+                        SelectLen(btnRight);
+                        OpenLenDirPopup(btnRight);
+                    };
+                    btnRight.Click += (_, __) =>
+                    {
+                        CancelActiveAnkaEdit();
+                        SelectLen(btnRight);
+                        OpenLenDirPopup(btnRight);
+                    };
+
+                    root.Children.Add(WithRowDivider(btnLeft));
+                    root.Children.Add(WithRowDivider(btnRight));
+
+                    lenPop.Child = WrapBox(root);
+
+                    placementBtn.Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        lenPop.IsOpen = true;
+                        SelectLen(null);
+                    }), DispatcherPriority.Input);
+                }
+
                 void OpenAnkaPopup(Button placementBtn)
                 {
                     if (ankaPop != null) ankaPop.IsOpen = false;
@@ -1783,7 +2066,11 @@ namespace RevitProjectDataAddin
                         StaysOpen = true
                     };
 
-                    tb.Tag = Tuple.Create(mainPop, ankaPop, sidePop ?? new System.Windows.Controls.Primitives.Popup());
+                    tb.Tag = Tuple.Create(mainPop,
+                                          ankaPop,
+                                          sidePop ?? new System.Windows.Controls.Primitives.Popup(),
+                                          lenPop ?? new System.Windows.Controls.Primitives.Popup(),
+                                          lenDirPop ?? new System.Windows.Controls.Primitives.Popup());
 
                     var root = new StackPanel { Orientation = Orientation.Vertical };
 
@@ -1870,28 +2157,18 @@ namespace RevitProjectDataAddin
                         });
                 };
 
-                var btnLen = MakeMenuButton("長さ", hasNext: false, minWidth: MENU1_MIN_WIDTH); // ✅ CẤP 1
+                var btnLen = MakeMenuButton("長さ", hasNext: true, minWidth: MENU1_MIN_WIDTH); // ✅ CẤP 1
                 btnLen.MouseEnter += (_, __) =>
                 {
                     CancelActiveAnkaEdit();
-                    CloseSubMenus();
                     SelectMain(btnLen);
+                    OpenLenPopup(btnLen);
                 };
                 btnLen.Click += (_, __) =>
                 {
                     CancelActiveAnkaEdit();
-                    CloseSubMenus();
                     SelectMain(btnLen);
-                    CloseAll();
-
-                    TrySplitTopParts(tb.Text, out var curD, out var curLen);
-                    BeginInlineEdit(curLen, input =>
-                    {
-                        string newLen = (input ?? string.Empty).Trim();
-                        string newWhole = $"D{curD}-{newLen}";
-                        if (SetOrangeDimText(owner, key, newWhole))
-                            Redraw(canvas, owner);
-                    });
+                    OpenLenPopup(btnLen);
                 };
 
                 var btnCut = MakeMenuButton("鉄筋を切る", hasNext: false, minWidth: MENU1_MIN_WIDTH); // ✅ CẤP 1
@@ -1966,7 +2243,9 @@ namespace RevitProjectDataAddin
 
                     tb.Tag = Tuple.Create(mainPop,
                                           ankaPop ?? new System.Windows.Controls.Primitives.Popup(),
-                                          sidePop ?? new System.Windows.Controls.Primitives.Popup());
+                                          sidePop ?? new System.Windows.Controls.Primitives.Popup(),
+                                          lenPop ?? new System.Windows.Controls.Primitives.Popup(),
+                                          lenDirPop ?? new System.Windows.Controls.Primitives.Popup());
                 }), DispatcherPriority.Input);
             };
         }
@@ -3068,13 +3347,18 @@ namespace RevitProjectDataAddin
 
                 if (brush == null) brush = Brushes.Black;
 
-                // Tập ranh giới thật giữa các đoạn đã merged
+                const double JoinTol = 0.5;
+                // Tập ranh giới thật giữa các đoạn đã merged (chỉ khi 2 đoạn chạm nhau)
                 var borders = new List<double>(Math.Max(0, segs.Count - 1));
                 for (int i = 0; i < segs.Count - 1; i++)
                 {
-                    // dùng trung điểm để an toàn số học
-                    double bx = 0.5 * (segs[i].x2 + segs[i + 1].x1);
-                    borders.Add(bx);
+                    double gap = Math.Abs(segs[i + 1].x1 - segs[i].x2);
+                    if (gap <= JoinTol)
+                    {
+                        // dùng trung điểm để an toàn số học
+                        double bx = 0.5 * (segs[i].x2 + segs[i + 1].x1);
+                        borders.Add(bx);
+                    }
                 }
                 if (borders.Count == 0) return;
 
@@ -3117,10 +3401,15 @@ namespace RevitProjectDataAddin
                 if (merged == null || merged.Count < 2) return;
                 if (rowCuts == null || rowCuts.Count == 0) return;
 
-                // border giữa các seg
+                const double JoinTol = 0.5;
+                // border giữa các seg (chỉ khi chạm nhau)
                 var borders = new List<double>();
                 for (int i = 0; i < merged.Count - 1; i++)
-                    borders.Add(0.5 * (merged[i].x2 + merged[i + 1].x1));
+                {
+                    double gap = Math.Abs(merged[i + 1].x1 - merged[i].x2);
+                    if (gap <= JoinTol)
+                        borders.Add(0.5 * (merged[i].x2 + merged[i + 1].x1));
+                }
 
                 var used = new bool[borders.Count];
 
@@ -3170,8 +3459,8 @@ namespace RevitProjectDataAddin
                 double x1, double x2, double y,
                 double dyTop, double dyBottom,
                 double[] phiMidArray, double[] spanLeftArrLocal, double[] spanRightArrLocal, int spanCountLocal,
-                bool hasLeftAnka, double leftAnkaX, double ankaLeftLen,
-                bool hasRightAnka, double rightAnkaX, double ankaRightLen,
+                double defaultLeftAnkaSigned, double defaultRightAnkaSigned,
+                double leftAnkaSigned, double rightAnkaSigned,
                 bool textAboveLine, // true: chữ nằm phía trên thanh cam
                 int rowIndex = 0    // ✅ optional để không bắt buộc sửa tất cả nơi gọi
             )
@@ -3185,21 +3474,23 @@ namespace RevitProjectDataAddin
                 int si = FindSpanIndexByX(cx, spanLeftArrLocal, spanRightArrLocal, spanCountLocal);
                 double phi = (si >= 0 && si < phiMidArray.Length) ? Math.Max(0, phiMidArray[si]) : 0.0;
 
-                // Anka hit-test theo biên hình học thực
-                bool hitLeft = hasLeftAnka && Near(x1, leftAnkaX, 0.5);
-                bool hitRight = hasRightAnka && Near(x2, rightAnkaX, 0.5);
+                // Segment key (để xoá cả line + dim)
+                var segKey = new OrangeSegKey(rowIndex, x1, x2, y);
+
+                bool hitLeft = Math.Abs(defaultLeftAnkaSigned) > 0.0001;
+                bool hitRight = Math.Abs(defaultRightAnkaSigned) > 0.0001;
+
+                bool hasLeftAnka = Math.Abs(leftAnkaSigned) > 0.0001;
+                bool hasRightAnka = Math.Abs(rightAnkaSigned) > 0.0001;
 
                 double ankaAdd =
-                    (hitLeft ? Math.Max(0, ankaLeftLen) : 0.0) +
-                    (hitRight ? Math.Max(0, ankaRightLen) : 0.0);
+                    (hasLeftAnka ? Math.Abs(leftAnkaSigned) : 0.0) +
+                    (hasRightAnka ? Math.Abs(rightAnkaSigned) : 0.0);
 
                 // Text TOP
                 double wxTop = cx;
                 double wyTop = y + dyTop;
                 var topKey = new OrangeDimTextKey(rowIndex, true, wxTop, wyTop);
-
-                // Segment key (để xoá cả line + dim)
-                var segKey = new OrangeSegKey(rowIndex, x1, x2, y);
 
                 // Bottom key (nếu có)
                 bool hasBotKey = false;
@@ -3220,7 +3511,9 @@ namespace RevitProjectDataAddin
                     HasBottomKey = hasBotKey,
                     BottomKey = botKey,
                     HitLeftAnka = hitLeft,
-                    HitRightAnka = hitRight
+                    HitRightAnka = hitRight,
+                    DefaultLeftAnkaSigned = hitLeft ? defaultLeftAnkaSigned : 0.0,
+                    DefaultRightAnkaSigned = hitRight ? defaultRightAnkaSigned : 0.0
                 });
 
                 // Nếu segment đã bị xoá thì không vẽ text (line sẽ bị skip ở vòng foreach bên ngoài)
@@ -4787,26 +5080,7 @@ namespace RevitProjectDataAddin
                             x2 += Math.Max(0, gTanbu) * phi;
                             x1 += Math.Max(0, nigeUwaLocal);
 
-                            if (!teiUwaNow)
-                            {
-                                if (ankaUwa > 0)
-                                {
-                                    // Vẽ ANKA lên trên
-                                    double ankaLeftSigned = GetAnkaOverride(item, kRow, AnkaSide.Left, +ankaUwa); // default: lên
-                                    DrawLine_Rec(canvas, T, item, x1, y, x1, y + ankaLeftSigned, Brushes.Orange, 1.2, null, "MARK");
-                                    // ANKA TEXT
-                                    if (anka1 == true)
-                                    {
-                                        DrawText_Rec(canvas, T, item, $"{ankaUwa:0}", x1 - 650, y + ankaUwa / 2 + 100, dimFont,
-                                                 Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                DrawRect_Rec(canvas, T, item, x1, y - rectH / 2.0, rectW, rectH,
-                                             stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
-                            }
+                            // ANKA/TEI sẽ được vẽ sau khi xác định segment còn hiển thị
                         }
                         else
                         {
@@ -4871,25 +5145,7 @@ namespace RevitProjectDataAddin
                             x1 -= Math.Max(0, gTanbu) * phi;
                             x2 -= Math.Max(0, nigeUwaLocal);
 
-                            if (!teiUwaNow)
-                            {
-                                if (ankaUwa > 0)
-                                {
-                                    double ankaRightSigned = GetAnkaOverride(item, kRow, AnkaSide.Right, +ankaUwa); // default: lên
-                                    DrawLine_Rec(canvas, T, item, x2, y, x2, y + ankaRightSigned, Brushes.Orange, 1.2, null, "MARK");
-                                    // <<< ANKA TEXT >>>
-                                    if (anka1 == true)
-                                    {
-                                        DrawText_Rec(canvas, T, item, $"{ankaUwa:0}", x2 + 250, y + ankaUwa / 2.0 + 100, dimFont,
-                                                 Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                DrawRect_Rec(canvas, T, item, x2, y - rectH / 2.0, rectW, rectH,
-                                             stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
-                            }
+                            // ANKA/TEI sẽ được vẽ sau khi xác định segment còn hiển thị
                         }
                         else
                         {
@@ -4944,20 +5200,67 @@ namespace RevitProjectDataAddin
                         x => GetTonariDotOffset(kRow, x)
                     );
 
+                    var visibleSegs = merged
+                        .Where(seg => !IsOrangeSegDeleted(item, kRow, seg.x1, seg.x2, y))
+                        .ToList();
+
                     // ② VẼ DOT KHÔNG OFFSET NỮA
                     DrawAdjustedHardCutDots(
                         canvas, T, item,
-                        merged, rowCuts,
+                        visibleSegs, rowCuts,
                         y, dotR,
                         Brushes.Black,
                         0,
                         null
                     );
 
-                    foreach (var seg in merged)
+                    foreach (var seg in visibleSegs)
                     {
-                        if (IsOrangeSegDeleted(item, kRow, seg.x1, seg.x2, y))
-                            continue;
+                        bool hitLeftBoundary = hasLeftAnka_Global && Near(seg.x1, leftAnkaX_Global, 0.5);
+                        bool hitRightBoundary = hasRightAnka_Global && Near(seg.x2, rightAnkaX_Global, 0.5);
+                        double defaultLeftSigned = hitLeftBoundary ? +ankaUwa : 0.0;
+                        double defaultRightSigned = hitRightBoundary ? +ankaUwa : 0.0;
+                        double wxTop = 0.5 * (seg.x1 + seg.x2);
+                        double wyTop = y + DimDyUpper - 200;
+                        var topKey = new OrangeDimTextKey(kRow, true, wxTop, wyTop);
+                        double leftSigned = GetAnkaOverride(item, topKey, AnkaSide.Left, defaultLeftSigned);
+                        double rightSigned = GetAnkaOverride(item, topKey, AnkaSide.Right, defaultRightSigned);
+
+                        if (teiUwaNow)
+                        {
+                            if (hitLeftBoundary)
+                            {
+                                DrawRect_Rec(canvas, T, item, seg.x1, y - rectH / 2.0, rectW, rectH,
+                                             stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
+                            }
+                            if (hitRightBoundary)
+                            {
+                                DrawRect_Rec(canvas, T, item, seg.x2, y - rectH / 2.0, rectW, rectH,
+                                             stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
+                            }
+                        }
+                        else
+                        {
+                            if (Math.Abs(leftSigned) > 0.0001)
+                            {
+                                DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x1, y - leftSigned, Brushes.Orange, 1.2, null, "MARK");
+                                if (anka1 == true)
+                                {
+                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(leftSigned):0}", seg.x1 - 650, y - leftSigned / 2.0 + 100, dimFont,
+                                             Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
+                                }
+                            }
+                            if (Math.Abs(rightSigned) > 0.0001)
+                            {
+                                DrawLine_Rec(canvas, T, item, seg.x2, y, seg.x2, y - rightSigned, Brushes.Orange, 1.2, null, "MARK");
+                                if (anka1 == true)
+                                {
+                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(rightSigned):0}", seg.x2 + 250, y - rightSigned / 2.0 + 100, dimFont,
+                                        Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
+                                }
+                            }
+                        }
+
                         DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x2, y, Brushes.Orange, 1.2, null, "MARK");
 
                         // TEXT CAM: dùng chiều dài đã làm tròn (hoặc đoạn cuối không làm tròn)
@@ -4966,8 +5269,8 @@ namespace RevitProjectDataAddin
                             seg.x1, seg.x2,
                             y, /*dyTop*/ DimDyUpper - 200, /*dyBottom*/ -DimDyUpper + 180,
                             diaMidArr, spanLeftArr, spanRightArr, spanCount,
-                            /*ANKA trái*/  hasLeftAnka_Global && !teiUwaNow, leftAnkaX_Global, ankaUwa,
-                            /*ANKA phải*/  hasRightAnka_Global && !teiUwaNow, rightAnkaX_Global, ankaUwa,
+                            defaultLeftSigned, defaultRightSigned,
+                            leftSigned, rightSigned,
                             /*textAboveLine*/ true, kRow
                         );
                     }
@@ -5114,24 +5417,7 @@ namespace RevitProjectDataAddin
                             x2 += Math.Max(0, gTanbu) * phi;        // gTanbu * Φ
                             x1 += Math.Max(0, nigeUwaChu1Local);    // nige cho 上宙1
 
-                            if (!teiUwaChuNow)
-                            {
-                                if (ankaUwaChu > 0)
-                                {
-                                    DrawLine_Rec(canvas, T, item, x1, y, x1, y + ankaUwaChu, Brushes.Orange, 1.2, null, "MARK");
-                                    // <<< ANKA TEXT >>>
-                                    if (anka1 == true)
-                                    {
-                                        DrawText_Rec(canvas, T, item, $"{ankaUwaChu:0}", x1 - 650, y + ankaUwaChu / 2.0 + 100, dimFont,
-                                                 Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                DrawRect_Rec(canvas, T, item, x1, y - rectH / 2.0, rectW, rectH,
-                                             stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
-                            }
+                            // ANKA/TEI sẽ được vẽ sau khi xác định segment còn hiển thị
                         }
                         else
                         {
@@ -5195,26 +5481,7 @@ namespace RevitProjectDataAddin
                             x1 -= Math.Max(0, gTanbu) * phi;        // gTanbu * Φ
                             x2 -= Math.Max(0, nigeUwaChu1Local);    // nige 上宙1 ngoài mép
 
-                            if (!teiUwaChuNow)
-                            {
-
-                                if (ankaUwaChu > 0)
-                                {
-                                    DrawLine_Rec(canvas, T, item, x2, y, x2, y + ankaUwaChu, Brushes.Orange, 1.2, null, "MARK");
-                                    // <<< ANKA TEXT >>>
-                                    if (anka1 == true)
-                                    {
-                                        DrawText_Rec(canvas, T, item, $"{ankaUwaChu:0}", x2 + 250, y + ankaUwaChu / 2.0 + 100, dimFont,
-                                                 Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
-                                    }
-                                }
-
-                            }
-                            else
-                            {
-                                DrawRect_Rec(canvas, T, item, x2, y - rectH / 2.0, rectW, rectH,
-                                             stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
-                            }
+                            // ANKA/TEI sẽ được vẽ sau khi xác định segment còn hiển thị
                         }
                         else
                         {
@@ -5269,20 +5536,67 @@ namespace RevitProjectDataAddin
                         x => GetTonariDotOffset(kRow, x)
                     );
 
+                    var visibleSegs = merged
+                        .Where(seg => !IsOrangeSegDeleted(item, kRow, seg.x1, seg.x2, y))
+                        .ToList();
+
                     // ② VẼ DOT KHÔNG OFFSET NỮA
                     DrawAdjustedHardCutDots(
                         canvas, T, item,
-                        merged, rowCuts,
+                        visibleSegs, rowCuts,
                         y, dotR,
                         Brushes.Black,
                         0,
                         null
                     );
 
-                    foreach (var seg in merged)
+                    foreach (var seg in visibleSegs)
                     {
-                        if (IsOrangeSegDeleted(item, kRow, seg.x1, seg.x2, y))
-                            continue;
+                        bool hitLeftBoundary = hasLeftAnka_Global && Near(seg.x1, leftAnkaX_Global, 0.5);
+                        bool hitRightBoundary = hasRightAnka_Global && Near(seg.x2, rightAnkaX_Global, 0.5);
+                        double defaultLeftSigned = hitLeftBoundary ? +ankaUwaChu : 0.0;
+                        double defaultRightSigned = hitRightBoundary ? +ankaUwaChu : 0.0;
+                        double wxTop = 0.5 * (seg.x1 + seg.x2);
+                        double wyTop = y + DimDyUpper - 200;
+                        var topKey = new OrangeDimTextKey(kRow, true, wxTop, wyTop);
+                        double leftSigned = GetAnkaOverride(item, topKey, AnkaSide.Left, defaultLeftSigned);
+                        double rightSigned = GetAnkaOverride(item, topKey, AnkaSide.Right, defaultRightSigned);
+
+                        if (teiUwaChuNow)
+                        {
+                            if (hitLeftBoundary)
+                            {
+                                DrawRect_Rec(canvas, T, item, seg.x1, y - rectH / 2.0, rectW, rectH,
+                                             stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
+                            }
+                            if (hitRightBoundary)
+                            {
+                                DrawRect_Rec(canvas, T, item, seg.x2, y - rectH / 2.0, rectW, rectH,
+                                             stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
+                            }
+                        }
+                        else
+                        {
+                            if (Math.Abs(leftSigned) > 0.0001)
+                            {
+                                DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x1, y - leftSigned, Brushes.Orange, 1.2, null, "MARK");
+                                if (anka1 == true)
+                                {
+                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(leftSigned):0}", seg.x1 - 650, y - leftSigned / 2.0 + 100, dimFont,
+                                             Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
+                                }
+                            }
+                            if (Math.Abs(rightSigned) > 0.0001)
+                            {
+                                DrawLine_Rec(canvas, T, item, seg.x2, y, seg.x2, y - rightSigned, Brushes.Orange, 1.2, null, "MARK");
+                                if (anka1 == true)
+                                {
+                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(rightSigned):0}", seg.x2 + 250, y - rightSigned / 2.0 + 100, dimFont,
+                                             Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
+                                }
+                            }
+                        }
+
                         DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x2, y, Brushes.Orange, 1.2, null, "MARK");
 
                         // TEXT CAM
@@ -5291,8 +5605,8 @@ namespace RevitProjectDataAddin
                             seg.x1, seg.x2,
                             y, /*dyTop*/ DimDyUpper - 200, /*dyBottom*/ -DimDyUpper + 180,
                             diaMidChu1Arr, spanLeftArr, spanRightArr, spanCount,
-                            hasLeftAnka_Global && !teiUwaChuNow, leftAnkaX_Global, ankaUwaChu,
-                            hasRightAnka_Global && !teiUwaChuNow, rightAnkaX_Global, ankaUwaChu,
+                            defaultLeftSigned, defaultRightSigned,
+                            leftSigned, rightSigned,
                             /*textAboveLine*/ true, kRow
 
                         );
@@ -5397,25 +5711,7 @@ namespace RevitProjectDataAddin
                             x2 += Math.Max(0, gTanbu) * phi;          // gTanbu * Φ
                             x1 += Math.Max(0, nigeUwaChu2Local);      // nige cho 上宙2
 
-                            if (!teiUwaChuNow)
-                            {
-
-                                if (ankaUwaChu > 0)
-                                {
-                                    DrawLine_Rec(canvas, T, item, x1, y, x1, y + ankaUwaChu, Brushes.Orange, 1.2, null, "MARK");
-                                    // <<< ANKA TEXT >>>
-                                    if (anka1 == true)
-                                    {
-                                        DrawText_Rec(canvas, T, item, $"{ankaUwaChu:0}", x1 - 650, y + ankaUwaChu / 2.0 + 100, dimFont,
-                                                 Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                DrawRect_Rec(canvas, T, item, x1, y - rectH / 2.0, rectW, rectH,
-                                             stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
-                            }
+                            // ANKA/TEI sẽ được vẽ sau khi xác định segment còn hiển thị
                         }
                         else
                         {
@@ -5489,21 +5785,7 @@ namespace RevitProjectDataAddin
                         x1 = Math.Max(x1, midArr[i] + minGap);
                         if (x2 > x1)
                         {
-                            if (!teiUwaChuNow && i == spanCount - 1 && ankaUwaChu > 0)
-                            {
-                                DrawLine_Rec(canvas, T, item, x2, y, x2, y + ankaUwaChu, Brushes.Orange, 1.2, null, "MARK");
-                                // <<< ANKA TEXT >>>
-                                if (anka1 == true)
-                                {
-                                    DrawText_Rec(canvas, T, item, $"{ankaUwaChu:0}", x2 + 250, y + ankaUwaChu / 2.0 + 100, dimFont,
-                                             Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
-                                }
-                            }
-                            else if (teiUwaChuNow && i == spanCount - 1)
-                            {
-                                DrawRect_Rec(canvas, T, item, x2, y - rectH / 2.0, rectW, rectH,
-                                             stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
-                            }
+                            // ANKA/TEI sẽ được vẽ sau khi xác định segment còn hiển thị
 
                             rowSegs.Add((x1, x2));
                         }
@@ -5551,21 +5833,67 @@ namespace RevitProjectDataAddin
                         x => GetTonariDotOffset(kRow, x)
                     );
 
+                    var visibleSegs = merged
+                        .Where(seg => !IsOrangeSegDeleted(item, kRow, seg.x1, seg.x2, y))
+                        .ToList();
+
                     // ② VẼ DOT KHÔNG OFFSET NỮA
                     DrawAdjustedHardCutDots(
                         canvas, T, item,
-                        merged, rowCuts,
+                        visibleSegs, rowCuts,
                         y, dotR,
                         Brushes.Black,
                         0,
                         null
                     );
 
-
-                    foreach (var seg in merged)
+                    foreach (var seg in visibleSegs)
                     {
-                        if (IsOrangeSegDeleted(item, kRow, seg.x1, seg.x2, y))
-                            continue;
+                        bool hitLeftBoundary = hasLeftAnka_Global && Near(seg.x1, leftAnkaX_Global, 0.5);
+                        bool hitRightBoundary = hasRightAnka_Global && Near(seg.x2, rightAnkaX_Global, 0.5);
+                        double defaultLeftSigned = hitLeftBoundary ? +ankaUwaChu : 0.0;
+                        double defaultRightSigned = hitRightBoundary ? +ankaUwaChu : 0.0;
+                        double wxTop = 0.5 * (seg.x1 + seg.x2);
+                        double wyTop = y + DimDyUpper - 200;
+                        var topKey = new OrangeDimTextKey(kRow, true, wxTop, wyTop);
+                        double leftSigned = GetAnkaOverride(item, topKey, AnkaSide.Left, defaultLeftSigned);
+                        double rightSigned = GetAnkaOverride(item, topKey, AnkaSide.Right, defaultRightSigned);
+
+                        if (teiUwaChuNow)
+                        {
+                            if (hitLeftBoundary)
+                            {
+                                DrawRect_Rec(canvas, T, item, seg.x1, y - rectH / 2.0, rectW, rectH,
+                                             stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
+                            }
+                            if (hitRightBoundary)
+                            {
+                                DrawRect_Rec(canvas, T, item, seg.x2, y - rectH / 2.0, rectW, rectH,
+                                             stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
+                            }
+                        }
+                        else
+                        {
+                            if (Math.Abs(leftSigned) > 0.0001)
+                            {
+                                DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x1, y - leftSigned, Brushes.Orange, 1.2, null, "MARK");
+                                if (anka1 == true)
+                                {
+                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(leftSigned):0}", seg.x1 - 650, y - leftSigned / 2.0 + 100, dimFont,
+                                         Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
+                                }
+                            }
+                            if (Math.Abs(rightSigned) > 0.0001)
+                            {
+                                DrawLine_Rec(canvas, T, item, seg.x2, y, seg.x2, y - rightSigned, Brushes.Orange, 1.2, null, "MARK");
+                                if (anka1 == true)
+                                {
+                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(rightSigned):0}", seg.x2 + 250, y - rightSigned / 2.0 + 100, dimFont,
+                                         Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
+                                }
+                            }
+                        }
+
                         DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x2, y, Brushes.Orange, 1.2, null, "MARK");
 
                         // TEXT CAM
@@ -5574,8 +5902,8 @@ namespace RevitProjectDataAddin
                             seg.x1, seg.x2,
                             y, /*dyTop*/ DimDyUpper - 200, /*dyBottom*/ -DimDyUpper + 180,
                             diaMidChu2Arr, spanLeftArr, spanRightArr, spanCount,
-                            hasLeftAnka_Global && !teiUwaChuNow, leftAnkaX_Global, ankaUwaChu,
-                            hasRightAnka_Global && !teiUwaChuNow, rightAnkaX_Global, ankaUwaChu,
+                            defaultLeftSigned, defaultRightSigned,
+                            leftSigned, rightSigned,
                             /*textAboveLine*/ true, kRow
 
                         );
@@ -5681,25 +6009,7 @@ namespace RevitProjectDataAddin
                             x2 += Math.Max(0, gTanbu) * phi;           // gTanbu * Φ
                             x1 += Math.Max(0, nigeShitaChu2Local);     // nige dưới (Chu2)
 
-                            if (!teiShitaChuNow)
-                            {
-                                if (ankaShitaChu > 0)
-                                {
-
-                                    DrawLine_Rec(canvas, T, item, x1, y, x1, y - ankaShitaChu, Brushes.Orange, 1.2, null, "MARK");
-                                    // <<< ANKA TEXT >>>
-                                    if (anka1 == true)
-                                    {
-                                        DrawText_Rec(canvas, T, item, $"{ankaShitaChu:0}", x1 - 650, y - ankaShitaChu / 2.0 + 100, dimFont,
-                                                 Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                DrawRect_Rec(canvas, T, item, x1, y - rectH / 2.0, rectW, rectH,
-                                             stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
-                            }
+                            // ANKA/TEI sẽ được vẽ sau khi xác định segment còn hiển thị
                         }
                         else
                         {
@@ -5766,24 +6076,7 @@ namespace RevitProjectDataAddin
                             x1 -= Math.Max(0, gTanbu) * phi;           // gTanbu * Φ
                             x2 -= Math.Max(0, nigeShitaChu2Local);     // nige ngoài mép
 
-                            if (!teiShitaChuNow)
-                            {
-                                if (ankaShitaChu > 0)
-                                {
-
-                                    DrawLine_Rec(canvas, T, item, x2, y, x2, y - ankaShitaChu, Brushes.Orange, 1.2, null, "MARK");
-                                    if (anka1 == true)
-                                    {
-                                        DrawText_Rec(canvas, T, item, $"{ankaShitaChu:0}", x2 + 250, y - ankaShitaChu / 2.0 + 100, dimFont,
-                                                 Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                DrawRect_Rec(canvas, T, item, x2, y - rectH / 2.0, rectW, rectH,
-                                             stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
-                            }
+                            // ANKA/TEI sẽ được vẽ sau khi xác định segment còn hiển thị
                         }
                         else
                         {
@@ -5844,21 +6137,67 @@ namespace RevitProjectDataAddin
                         x => GetTonariDotOffset(kRow, x)
                     );
 
+                    var visibleSegs = merged
+                        .Where(seg => !IsOrangeSegDeleted(item, kRow, seg.x1, seg.x2, y))
+                        .ToList();
+
                     // ② VẼ DOT KHÔNG OFFSET NỮA
                     DrawAdjustedHardCutDots(
                         canvas, T, item,
-                        merged, rowCuts,
+                        visibleSegs, rowCuts,
                         y, dotR,
                         Brushes.Black,
                         0,
                         null
                     );
 
-
-                    foreach (var seg in merged)
+                    foreach (var seg in visibleSegs)
                     {
-                        if (IsOrangeSegDeleted(item, kRow, seg.x1, seg.x2, y))
-                            continue;
+                        bool hitLeftBoundary = hasLeftAnka_Global && Near(seg.x1, leftAnkaX_Global, 0.5);
+                        bool hitRightBoundary = hasRightAnka_Global && Near(seg.x2, rightAnkaX_Global, 0.5);
+                        double defaultLeftSigned = hitLeftBoundary ? -ankaShitaChu : 0.0;
+                        double defaultRightSigned = hitRightBoundary ? -ankaShitaChu : 0.0;
+                        double wxTop = 0.5 * (seg.x1 + seg.x2);
+                        double wyTop = y + DimDyLower - 100;
+                        var topKey = new OrangeDimTextKey(kRow, true, wxTop, wyTop);
+                        double leftSigned = GetAnkaOverride(item, topKey, AnkaSide.Left, defaultLeftSigned);
+                        double rightSigned = GetAnkaOverride(item, topKey, AnkaSide.Right, defaultRightSigned);
+
+                        if (teiShitaChuNow)
+                        {
+                            if (hitLeftBoundary)
+                            {
+                                DrawRect_Rec(canvas, T, item, seg.x1, y - rectH / 2.0, rectW, rectH,
+                                             stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
+                            }
+                            if (hitRightBoundary)
+                            {
+                                DrawRect_Rec(canvas, T, item, seg.x2, y - rectH / 2.0, rectW, rectH,
+                                             stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
+                            }
+                        }
+                        else
+                        {
+                            if (Math.Abs(leftSigned) > 0.0001)
+                            {
+                                DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x1, y - leftSigned, Brushes.Orange, 1.2, null, "MARK");
+                                if (anka1 == true)
+                                {
+                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(leftSigned):0}", seg.x1 - 650, y - leftSigned / 2.0 + 100, dimFont,
+                                             Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
+                                }
+                            }
+                            if (Math.Abs(rightSigned) > 0.0001)
+                            {
+                                DrawLine_Rec(canvas, T, item, seg.x2, y, seg.x2, y - rightSigned, Brushes.Orange, 1.2, null, "MARK");
+                                if (anka1 == true)
+                                {
+                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(rightSigned):0}", seg.x2 + 250, y - rightSigned / 2.0 + 100, dimFont,
+                                             Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
+                                }
+                            }
+                        }
+
                         DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x2, y, Brushes.Orange, 1.2, null, "MARK");
 
                         // TEXT CAM (nhóm dưới): textAboveLine=false, dùng DimDyLower
@@ -5867,8 +6206,8 @@ namespace RevitProjectDataAddin
                             seg.x1, seg.x2,
                             y, /*dyTop*/ DimDyLower - 100, /*dyBottom*/ -DimDyLower + 50,
                             diaMidShitaChu2Arr, spanLeftArr, spanRightArr, spanCount,
-                            hasLeftAnka_Global && !teiShitaChuNow, leftAnkaX_Global, ankaShitaChu,
-                            hasRightAnka_Global && !teiShitaChuNow, rightAnkaX_Global, ankaShitaChu,
+                            defaultLeftSigned, defaultRightSigned,
+                            leftSigned, rightSigned,
                             /*textAboveLine*/ false, kRow
 
                         );
@@ -5976,25 +6315,7 @@ namespace RevitProjectDataAddin
                             x2 += Math.Max(0, gTanbu) * phi;           // gTanbu * Φ
                             x1 += Math.Max(0, nigeShitaChu1Local);     // nige dưới (Chu1)
 
-                            if (!teiShitaChuNow)
-                            {
-                                if (ankaShitaChu > 0)
-                                {
-
-                                    DrawLine_Rec(canvas, T, item, x1, y, x1, y - ankaShitaChu, Brushes.Orange, 1.2, null, "MARK");
-                                    // <<< ANKA TEXT >>>
-                                    if (anka1 == true)
-                                    {
-                                        DrawText_Rec(canvas, T, item, $"{ankaShitaChu:0}", x1 - 650, y - ankaShitaChu / 2.0 + 100, dimFont,
-                                                 Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                DrawRect_Rec(canvas, T, item, x1, y - rectH / 2.0, rectW, rectH,
-                                             stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
-                            }
+                            // ANKA/TEI sẽ được vẽ sau khi xác định segment còn hiển thị
                         }
                         else
                         {
@@ -6058,24 +6379,7 @@ namespace RevitProjectDataAddin
                             x1 -= Math.Max(0, gTanbu) * phi;           // gTanbu * Φ
                             x2 -= Math.Max(0, nigeShitaChu1Local);     // nige ngoài mép
 
-                            if (!teiShitaChuNow)
-                            {
-                                if (ankaShitaChu > 0)
-                                {
-                                    DrawLine_Rec(canvas, T, item, x2, y, x2, y - ankaShitaChu, Brushes.Orange, 1.2, null, "MARK");
-                                    // <<< ANKA TEXT >>>
-                                    if (anka1 == true)
-                                    {
-                                        DrawText_Rec(canvas, T, item, $"{ankaShitaChu:0}", x2 + 250, y - ankaShitaChu / 2.0 + 100, dimFont,
-                                                 Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                DrawRect_Rec(canvas, T, item, x2, y - rectH / 2.0, rectW, rectH,
-                                             stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
-                            }
+                            // ANKA/TEI sẽ được vẽ sau khi xác định segment còn hiển thị
                         }
                         else
                         {
@@ -6136,22 +6440,67 @@ namespace RevitProjectDataAddin
                         x => GetTonariDotOffset(kRow, x)
                     );
 
+                    var visibleSegs = merged
+                        .Where(seg => !IsOrangeSegDeleted(item, kRow, seg.x1, seg.x2, y))
+                        .ToList();
+
                     // ② VẼ DOT KHÔNG OFFSET NỮA
                     DrawAdjustedHardCutDots(
                         canvas, T, item,
-                        merged, rowCuts,
+                        visibleSegs, rowCuts,
                         y, dotR,
                         Brushes.Black,
                         0,
                         null
                     );
 
-
-
-                    foreach (var seg in merged)
+                    foreach (var seg in visibleSegs)
                     {
-                        if (IsOrangeSegDeleted(item, kRow, seg.x1, seg.x2, y))
-                            continue;
+                        bool hitLeftBoundary = hasLeftAnka_Global && Near(seg.x1, leftAnkaX_Global, 0.5);
+                        bool hitRightBoundary = hasRightAnka_Global && Near(seg.x2, rightAnkaX_Global, 0.5);
+                        double defaultLeftSigned = hitLeftBoundary ? -ankaShitaChu : 0.0;
+                        double defaultRightSigned = hitRightBoundary ? -ankaShitaChu : 0.0;
+                        double wxTop = 0.5 * (seg.x1 + seg.x2);
+                        double wyTop = y + DimDyLower - 100;
+                        var topKey = new OrangeDimTextKey(kRow, true, wxTop, wyTop);
+                        double leftSigned = GetAnkaOverride(item, topKey, AnkaSide.Left, defaultLeftSigned);
+                        double rightSigned = GetAnkaOverride(item, topKey, AnkaSide.Right, defaultRightSigned);
+
+                        if (teiShitaChuNow)
+                        {
+                            if (hitLeftBoundary)
+                            {
+                                DrawRect_Rec(canvas, T, item, seg.x1, y - rectH / 2.0, rectW, rectH,
+                                             stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
+                            }
+                            if (hitRightBoundary)
+                            {
+                                DrawRect_Rec(canvas, T, item, seg.x2, y - rectH / 2.0, rectW, rectH,
+                                             stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
+                            }
+                        }
+                        else
+                        {
+                            if (Math.Abs(leftSigned) > 0.0001)
+                            {
+                                DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x1, y - leftSigned, Brushes.Orange, 1.2, null, "MARK");
+                                if (anka1 == true)
+                                {
+                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(leftSigned):0}", seg.x1 - 650, y - leftSigned / 2.0 + 100, dimFont,
+                                             Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
+                                }
+                            }
+                            if (Math.Abs(rightSigned) > 0.0001)
+                            {
+                                DrawLine_Rec(canvas, T, item, seg.x2, y, seg.x2, y - rightSigned, Brushes.Orange, 1.2, null, "MARK");
+                                if (anka1 == true)
+                                {
+                                    DrawText_Rec(canvas, T, item, $"{Math.Abs(rightSigned):0}", seg.x2 + 250, y - rightSigned / 2.0 + 100, dimFont,
+                                             Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
+                                }
+                            }
+                        }
+
                         DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x2, y, Brushes.Orange, 1.2, null, "MARK");
 
                         // TEXT CAM (nhóm dưới)
@@ -6160,8 +6509,8 @@ namespace RevitProjectDataAddin
                             seg.x1, seg.x2,
                             y, /*dyTop*/ DimDyLower - 100, /*dyBottom*/ -DimDyLower + 50,
                             diaMidShitaChu1Arr, spanLeftArr, spanRightArr, spanCount,
-                            hasLeftAnka_Global && !teiShitaChuNow, leftAnkaX_Global, ankaShitaChu,
-                            hasRightAnka_Global && !teiShitaChuNow, rightAnkaX_Global, ankaShitaChu,
+                            defaultLeftSigned, defaultRightSigned,
+                            leftSigned, rightSigned,
                             /*textAboveLine*/ false, kRow
 
                         );
@@ -6332,26 +6681,7 @@ namespace RevitProjectDataAddin
                                 x2 += Math.Max(0, gTanbu) * phi;           // gTanbu * Φ
                                 x1 += Math.Max(0, nigeShita);              // nige dưới
 
-                                if (!teiShitaNow)
-                                {
-                                    if (ankaShita > 0)
-                                    {
-                                        DrawLine_Rec(canvas, T, item, x1, y, x1, y - ankaShita, Brushes.Orange, 1.2, null, "MARK");
-                                        shitaAnkaYs.Add((y, y - ankaShita));
-                                        // <<< ANKA TEXT >>>
-                                        if (anka1 == true)
-                                        {
-                                            DrawText_Rec(canvas, T, item, $"{ankaShita:0}", x1 - 650, y - ankaShita / 2.0 + 100, dimFont,
-                                                     Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
-                                        }
-
-                                    }
-                                }
-                                else
-                                {
-                                    DrawRect_Rec(canvas, T, item, x1, y - rectH / 2.0, rectW, rectH,
-                                                 stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
-                                }
+                                // ANKA/TEI sẽ được vẽ sau khi xác định segment còn hiển thị
                             }
                             else
                             {
@@ -6416,27 +6746,7 @@ namespace RevitProjectDataAddin
                                 x1 -= Math.Max(0, gTanbu) * phi;           // gTanbu * Φ
                                 x2 -= Math.Max(0, nigeShita);              // nige ngoài mép
 
-                                if (!teiShitaNow)
-                                {
-                                    if (ankaShita > 0)
-                                    {
-                                        DrawLine_Rec(canvas, T, item, x2, y, x2, y - ankaShita, Brushes.Orange, 1.2, null, "MARK");
-                                        shitaAnkaYs.Add((y, y - ankaShita));
-                                        // <<< ANKA TEXT >>>
-                                        if (anka1 == true)
-                                        {
-                                            DrawText_Rec(canvas, T, item, $"{ankaShita:0}", x2 + 250, y - ankaShita / 2.0 + 100, dimFont,
-                                                     Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
-                                        }
-
-
-                                    }
-                                }
-                                else
-                                {
-                                    DrawRect_Rec(canvas, T, item, x2, y - rectH / 2.0, rectW, rectH,
-                                                 stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
-                                }
+                                // ANKA/TEI sẽ được vẽ sau khi xác định segment còn hiển thị
                             }
                             else
                             {
@@ -6499,20 +6809,69 @@ namespace RevitProjectDataAddin
                             x => GetTonariDotOffset(kRow, x)
                         );
 
+                        var visibleSegs = merged
+                            .Where(seg => !IsOrangeSegDeleted(item, kRow, seg.x1, seg.x2, y))
+                            .ToList();
+
                         // ② VẼ DOT KHÔNG OFFSET NỮA
                         DrawAdjustedHardCutDots(
                             canvas, T, item,
-                            merged, rowCuts,
+                            visibleSegs, rowCuts,
                             y, dotR,
                             Brushes.Black,
                             0,
                             null
                         );
 
-                        foreach (var seg in merged)
+                        foreach (var seg in visibleSegs)
                         {
-                            if (IsOrangeSegDeleted(item, kRow, seg.x1, seg.x2, y))
-                                continue;
+                            bool hitLeftBoundary = hasLeftAnka_Global && Near(seg.x1, leftAnkaX_Global, 0.5);
+                            bool hitRightBoundary = hasRightAnka_Global && Near(seg.x2, rightAnkaX_Global, 0.5);
+                            double defaultLeftSigned = hitLeftBoundary ? -ankaShita : 0.0;
+                            double defaultRightSigned = hitRightBoundary ? -ankaShita : 0.0;
+                            double wxTop = 0.5 * (seg.x1 + seg.x2);
+                            double wyTop = y + DimDyLower - 100;
+                            var topKey = new OrangeDimTextKey(kRow, true, wxTop, wyTop);
+                            double leftSigned = GetAnkaOverride(item, topKey, AnkaSide.Left, defaultLeftSigned);
+                            double rightSigned = GetAnkaOverride(item, topKey, AnkaSide.Right, defaultRightSigned);
+
+                            if (teiShitaNow)
+                            {
+                                if (hitLeftBoundary)
+                                {
+                                    DrawRect_Rec(canvas, T, item, seg.x1, y - rectH / 2.0, rectW, rectH,
+                                                 stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
+                                }
+                                if (hitRightBoundary)
+                                {
+                                    DrawRect_Rec(canvas, T, item, seg.x2, y - rectH / 2.0, rectW, rectH,
+                                                 stroke: Brushes.Black, strokeThickness: 1.0, fill: Brushes.Black, layer: "MARK");
+                                }
+                            }
+                            else
+                            {
+                                if (Math.Abs(leftSigned) > 0.0001)
+                                {
+                                    DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x1, y - leftSigned, Brushes.Orange, 1.2, null, "MARK");
+                                    shitaAnkaYs.Add((y, y - leftSigned));
+                                    if (anka1 == true)
+                                    {
+                                        DrawText_Rec(canvas, T, item, $"{Math.Abs(leftSigned):0}", seg.x1 - 650, y - leftSigned / 2.0 + 100, dimFont,
+                                                 Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
+                                    }
+                                }
+                                if (Math.Abs(rightSigned) > 0.0001)
+                                {
+                                    DrawLine_Rec(canvas, T, item, seg.x2, y, seg.x2, y - rightSigned, Brushes.Orange, 1.2, null, "MARK");
+                                    shitaAnkaYs.Add((y, y - rightSigned));
+                                    if (anka1 == true)
+                                    {
+                                        DrawText_Rec(canvas, T, item, $"{Math.Abs(rightSigned):0}", seg.x2 + 250, y - rightSigned / 2.0 + 100, dimFont,
+                                                 Brushes.Black, HAnchor.Left, VAnchor.Bottom, 120, "TEXT");
+                                    }
+                                }
+                            }
+
                             DrawLine_Rec(canvas, T, item, seg.x1, y, seg.x2, y, Brushes.Orange, 1.2, null, "MARK");
 
                             // TEXT CAM (nhóm dưới)
@@ -6521,8 +6880,8 @@ namespace RevitProjectDataAddin
                                 seg.x1, seg.x2,
                                 y, /*dyTop*/ DimDyLower - 100, /*dyBottom*/ -DimDyLower + 50,
                                 diaMidShitaArr, spanLeftArr, spanRightArr, spanCount,
-                                hasLeftAnka_Global && !teiShitaNow, leftAnkaX_Global, ankaShita,
-                                hasRightAnka_Global && !teiShitaNow, rightAnkaX_Global, ankaShita,
+                                defaultLeftSigned, defaultRightSigned,
+                                leftSigned, rightSigned,
                                 /*textAboveLine*/ false, kRow
 
                             );
