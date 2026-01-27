@@ -1901,7 +1901,10 @@ namespace RevitProjectDataAddin
                         void EndEditShowPreview()
                         {
                             box.Visibility = System.Windows.Visibility.Collapsed;
-                            preview.Visibility = System.Windows.Visibility.Visible;
+                            if (box.Tag is FrameworkElement prev)
+                                prev.Visibility = System.Windows.Visibility.Visible;
+                            else
+                                preview.Visibility = System.Windows.Visibility.Visible;
 
                             if (activeLenBox == box) activeLenBox = null;
                         }
@@ -1910,11 +1913,14 @@ namespace RevitProjectDataAddin
                         {
                             if (activeLenBox != null && activeLenBox != box)
                             {
+                                if (activeLenBox.Tag is FrameworkElement prev)
+                                    prev.Visibility = System.Windows.Visibility.Visible;
                                 activeLenBox.Visibility = System.Windows.Visibility.Collapsed;
                             }
                             activeLenBox = box;
 
                             box.Text = (box.Text ?? string.Empty).Trim();
+                            box.Tag = preview;
                             preview.Visibility = System.Windows.Visibility.Collapsed;
                             box.Visibility = System.Windows.Visibility.Visible;
                             FocusBox();
