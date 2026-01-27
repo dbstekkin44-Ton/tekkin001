@@ -1951,6 +1951,7 @@ namespace RevitProjectDataAddin
                         rowHost.MouseEnter += (_, __) =>
                         {
                             CancelActiveAnkaEdit();
+                            EndEditShowPreview();
                             SelectLenDir(rowHost);
                         };
 
