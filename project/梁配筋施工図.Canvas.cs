@@ -1852,6 +1852,15 @@ namespace RevitProjectDataAddin
 
                     TextBox activeLenBox = null;
 
+                    void CancelActiveLenEdit()
+                    {
+                        if (activeLenBox == null) return;
+                        if (activeLenBox.Tag is FrameworkElement prev)
+                            prev.Visibility = System.Windows.Visibility.Visible;
+                        activeLenBox.Visibility = System.Windows.Visibility.Collapsed;
+                        activeLenBox = null;
+                    }
+
                     Border MakeLenDirRow(string label, bool pullLeft)
                     {
                         var rowHost = new Border
@@ -1951,7 +1960,8 @@ namespace RevitProjectDataAddin
                         rowHost.MouseEnter += (_, __) =>
                         {
                             CancelActiveAnkaEdit();
-                            EndEditShowPreview();
+                            if (activeLenBox != box)
+                                CancelActiveLenEdit();
                             SelectLenDir(rowHost);
                         };
 
